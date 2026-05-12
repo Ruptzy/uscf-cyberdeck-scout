@@ -194,19 +194,66 @@ def smurf_label(score: float) -> str:
     return "🔴 Smurf alert"
 
 
+def career_strength_band(n: int) -> tuple[str, str]:
+    """Returns (code, plain-English label) describing how much
+    career data we have."""
+    if n < 5:   return ("very_limited", "Very limited profile")
+    if n < 15:  return ("limited",      "Limited profile")
+    if n < 50:  return ("usable",       "Usable profile")
+    if n < 100: return ("strong",       "Strong profile")
+    return ("very_strong", "Very strong profile")
+
+
+def recent_sample_band(n: int) -> tuple[str, str]:
+    if n == 0: return ("none",        "No recent games found")
+    if n < 5:  return ("very_small",  "Very small recent sample")
+    if n < 10: return ("limited",     "Limited recent sample")
+    return ("usable", "Usable recent form")
+
+
+def build_data_advisory(career_band_label: str, recent_band_label: str,
+                        n_career: int, n_90d: int) -> str:
+    """Soft advisory string telling the user what to trust and what
+    to interpret carefully, given the sample sizes we actually have."""
+    if n_career == 0:
+        return "No tournament history on file for this player."
+    if n_career >= 50 and n_90d >= 10:
+        return f"{career_band_label} ({n_career} games) and {recent_band_label.lower()} ({n_90d} games in last 90d). All metrics are reasonably trustworthy."
+    if n_career >= 20 and n_90d == 0:
+        return f"{career_band_label} ({n_career} career games), but no recent games in the last 90 days. Career strength is well-supported; recent-form metrics should be interpreted carefully."
+    if n_career >= 20 and n_90d < 10:
+        return f"{career_band_label} ({n_career} career games), but limited recent activity ({n_90d} games in 90d). Career numbers are dependable; treat recent-form numbers as preliminary."
+    if n_career < 20 and n_90d >= 5:
+        return f"{career_band_label} ({n_career} career games) but {recent_band_label.lower()}. Recent results are usable; career-level patterns need more data to be confident."
+    return f"{career_band_label} ({n_career} career games), {recent_band_label.lower()} ({n_90d} games in 90d). Treat this scouting card as preliminary."
+
+
 def score_player(row) -> dict:
-    if row.get("small_sample_warning"):
+    n_career = int(row.get("career_n_games") or 0)
+    n_90d    = int(row.get("games_last_90d") or 0)
+
+    career_code, career_label = career_strength_band(n_career)
+    recent_code, recent_label = recent_sample_band(n_90d)
+    advisory = build_data_advisory(career_label, recent_label, n_career, n_90d)
+
+    # Only block scoring when we have literally no tournament history
+    # on file.  Everyone else gets a score with an appropriate advisory
+    # and sample-size multiplier — far more useful than a hard block.
+    if n_career == 0:
         return {
             "player_id": row["player_id"],
             "underrated_score": None,
-            "bucket_label": "Insufficient data",
-            "smurf_label": "⚪ Insufficient data",
+            "bucket_label": "No data on file",
+            "smurf_label": "⚪ No data on file",
             "upset_score": 0.0, "form_score": 0.0, "momentum_score": 0.0,
             "schedule_score": 0.0, "activity_score": 0.0, "volatility_score": 0.0,
             "upset_label": "N/A", "form_label": "N/A", "momentum_label": "N/A",
             "schedule_label": "N/A", "activity_label": "N/A", "volatility_label": "N/A",
             "sample_size_multiplier": 0.0,
-            "highlight_signals": "Needs more recent games before scouting score is meaningful.",
+            "career_strength": career_code,
+            "recent_sample_strength": recent_code,
+            "data_advisory": advisory,
+            "highlight_signals": "No tournament history on file for this player.",
         }
 
     upset, upset_lab = upset_component(row)
@@ -271,6 +318,9 @@ def score_player(row) -> dict:
         "sample_size_multiplier": round(mult, 2),
         "bucket_label": bucket_label(total),
         "smurf_label": smurf_label(total),
+        "career_strength": career_code,
+        "recent_sample_strength": recent_code,
+        "data_advisory": advisory,
         "upset_score": round(upset, 1), "upset_label": upset_lab,
         "form_score": round(form, 1), "form_label": form_lab,
         "momentum_score": round(moment, 1), "momentum_label": moment_lab,
@@ -299,6 +349,7 @@ def main():
 
     # Reorder columns
     cols = ["player_id", "underrated_score", "bucket_label", "smurf_label",
+            "career_strength", "recent_sample_strength", "data_advisory",
             "upset_score", "form_score", "momentum_score",
             "schedule_score", "activity_score", "volatility_score",
             "upset_label", "form_label", "momentum_label",

@@ -630,6 +630,125 @@ def _fmt_int(x):
     return str(int(x))
 
 
+# ============================================================================
+# Coaching advice — practical chess-prep ideas derived from the profile.
+# Inspired by standard chess-coaching principles; not a guaranteed game plan.
+# ============================================================================
+def build_coaching_advice(profile: dict, score: dict | None) -> list[str]:
+    """Return 3–6 plain-English bullets of practical preparation ideas
+    based on a player's scouting profile."""
+    out: list[str] = []
+    s = score or {}
+    upset = float(s.get("upset_score") or 0)
+    form  = float(s.get("form_score") or 0)
+    moment = float(s.get("momentum_score") or 0)
+    sched = float(s.get("schedule_score") or 0)
+    vol   = float(s.get("volatility_score") or 0)
+    active = float(s.get("activity_score") or 0)
+
+    g90 = profile.get("games_last_90d") or 0
+    wr90 = profile.get("recent_win_rate_90d")
+    best_tc = profile.get("best_time_control_by_score_rate")
+    blitz_pct = profile.get("pct_blitz_games") or 0
+
+    # --- Upset / giant-killer ---
+    if upset >= 14:
+        out.append(
+            "**Treat the rating gap with respect.** This opponent has a record of beating "
+            "higher-rated players. Choose solid openings you know well and avoid unnecessary "
+            "complications unless you've calculated clearly."
+        )
+
+    # --- Hot recent form ---
+    if form >= 14 and wr90 is not None and wr90 >= 0.55:
+        out.append(
+            "**They're in form.** Recent results suggest they may be sharper than rating "
+            "alone shows. Prepare seriously and avoid casual or experimental opening choices."
+        )
+
+    # --- Rising rating ---
+    if moment >= 14:
+        out.append(
+            "**Rating is climbing.** This player has been gaining points recently — their "
+            "true strength may be slightly ahead of the number on paper."
+        )
+
+    # --- High activity ---
+    if active >= 7 or g90 >= 15:
+        out.append(
+            "**Very active recently.** Expect sharper, more practical play and good clock "
+            "management. Stay focused early; don't drift in the opening."
+        )
+
+    # --- Rusty / inactive ---
+    if (g90 or 0) <= 1 and (profile.get("career_n_games") or 0) >= 30:
+        out.append(
+            "**Possibly rusty.** They haven't played much in the last 90 days. Apply steady "
+            "pressure and let them solve practical problems rather than forcing chaos."
+        )
+
+    # --- Time-control specialist ---
+    if best_tc == "Blitz" or blitz_pct >= 0.5:
+        out.append(
+            "**Blitz-strong opponent.** Don't drift into time trouble. Choose positions with "
+            "clear plans you can play quickly and confidently."
+        )
+    elif best_tc == "Regular":
+        out.append(
+            "**Classical-style opponent.** They favor slower, deeper games. Be ready for long "
+            "strategic phases and don't expect them to crack from time pressure alone."
+        )
+
+    # --- Strong schedule ---
+    if sched >= 10:
+        out.append(
+            "**Battle-tested.** This player frequently plays up against stronger fields, so "
+            "their rating may understate how prepared they are. Don't underestimate."
+        )
+
+    # --- Volatile / boom-bust ---
+    if vol >= 7 or profile.get("boom_bust_flag"):
+        out.append(
+            "**Volatile performer.** Capable of tactical swings in either direction. Stay "
+            "calm and convert advantages patiently — don't try to match the chaos."
+        )
+
+    # --- Weak recent form ---
+    if wr90 is not None and wr90 <= 0.40 and (g90 or 0) >= 5:
+        out.append(
+            "**Cold recent form.** Apply pressure steadily and stay disciplined. Don't "
+            "become overconfident — players bounce back."
+        )
+
+    # Fallback if nothing strong fired
+    if not out:
+        out.append(
+            "No standout danger signals. Play your usual preparation and trust the rating "
+            "difference if it favors you."
+        )
+
+    return out[:6]
+
+
+def render_coaching_card(profile: dict, score: dict | None,
+                         heading: str = "PRACTICAL CHESS PREP IDEAS") -> None:
+    """Render the coaching-advice card with a clear disclaimer."""
+    bullets = build_coaching_advice(profile, score)
+    items = "".join(f"<li style='margin-bottom:0.45rem;'>{b}</li>" for b in bullets)
+    hud_card(
+        heading,
+        f"""
+        <ul style="margin:0; padding-left:1.2rem; font-size:1.0rem; line-height:1.6;">{items}</ul>
+        <div style="color:var(--text-muted); font-size:0.78rem; margin-top:0.6rem; line-height:1.5;">
+          Inspired by standard chess-coaching principles. These are general
+          preparation ideas based on the available data, <em>not</em> a guaranteed
+          game plan.
+        </div>
+        """,
+        variant="gold",
+    )
+
+
 # Plotly theming
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
@@ -764,13 +883,17 @@ with st.sidebar:
 # PAGE 1 — Command Center
 # ============================================================================
 def page_command_center():
-    hud_header(
-        "ACCESS GRANTED  ·  NODE 0xC4",
-        "USCF Cyberdeck Scout",
-        "Opponent scouting + game-outcome prediction from public USCF history data.",
-    )
+    # ------- Hero block (cinematic) -------
+    render_html("""
+        <div class="hud-meta">ACCESS GRANTED  ·  NODE 0xC4  ·  SESSION ACTIVE</div>
+        <h1 style="margin:0 0 0.3rem 0; font-size:2.6rem; line-height:1.0;">USCF Cyberdeck Scout</h1>
+        <div style="color:var(--text-muted); font-size:1.15rem; max-width:780px; line-height:1.5;">
+          United States Chess Federation opponent scouting and
+          game-outcome prediction from rated tournament history.
+        </div>
+    """)
 
-    # Headline metric strip
+    # Headline metric strip — readable, generous spacing
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("RAW GAMES SCRAPED", "13,305")
     c2.metric("CLEAN MODELED GAMES", "8,514")
@@ -779,70 +902,170 @@ def page_command_center():
 
     divider()
 
-    cL, cR = st.columns([1.1, 1])
-    with cL:
-        hud_card(
-            "MISSION BRIEF",
-            """
-            <p>USCF Cyberdeck Scout transforms public USCF tournament data into
-            <strong style="color:var(--cyan-main)">game-outcome predictions</strong>
-            and <strong style="color:var(--cyan-main)">opponent scouting reports</strong>.</p>
-            <p>The goal is not just to ask <em>"who is favored?"</em> &mdash;
-            Elo already answers that. The goal is to explain
-            <strong style="color:var(--gold-accent)">what kind of opponent you are facing</strong>:
-            are they hot, rusty, dangerous against stronger players, on the rise?</p>
-            """,
-        )
-        hud_card(
-            "TWO-LAYER ARCHITECTURE",
-            """
-            <p><strong style="color:var(--cyan-main)">ML LAYER.</strong>
-            Supervised classifier (Gradient Boosting) tuned with
-            <code style="color:var(--cyan-soft)">TimeSeriesSplit(5)</code> +
-            <code style="color:var(--cyan-soft)">GridSearchCV</code> on a 70%
-            chronological training pool, judged on a held-out 15% test slice
-            the model never saw.</p>
-            <p><strong style="color:var(--cyan-main)">SCOUTING LAYER.</strong>
-            Interpretable, rule-based 0–100 <em>"Underrated Potential"</em>
-            score derived from each player's activity, recent form, upset
-            history, schedule strength, momentum, and volatility.</p>
-            """,
-            variant="success",
-        )
+    # ------- What is USCF? Plain English first --------
+    hud_card(
+        "WHAT IS USCF?",
+        """
+        <p style="font-size:1.02rem; line-height:1.6;">
+        <strong style="color:var(--cyan-main)">USCF</strong> stands for the
+        <strong>United States Chess Federation</strong> — the main organization
+        behind official rated chess tournaments in the United States. Every
+        tournament-rated game played in the U.S. flows through their system.
+        </p>
+        <p style="font-size:1.02rem; line-height:1.6;">
+        In plain English, this project uses data from the
+        <strong style="color:var(--cyan-main)">official U.S. chess rating and
+        tournament network</strong> — public crosstable pages from
+        <code>uschess.org</code> covering thousands of real tournament games.
+        </p>
+        """,
+    )
 
-    with cR:
-        hud_card(
-            "DATA SOURCE",
-            """
-            <p style="font-family:'Share Tech Mono',monospace;line-height:1.7;font-size:0.85rem;">
-            SOURCE ........ public USCF MSA<br/>
-            NOT KAGGLE .... ✔<br/>
-            COLLECTION .... custom scraper + cache<br/>
-            DELAY ......... 2.0 sec / request<br/>
-            CACHE PAGES ... 4,292<br/>
-            DATE RANGE .... 2001-03 → 2025-10<br/>
-            SCRAPER ....... <span style="color:#FF7777;">DISABLED IN APP</span>
-            </p>
-            """,
-        )
-        hud_card(
-            "DATA QUALITY ALERT",
-            """
-            <p style="line-height:1.5;">
-            A parser bug was caught during EDA: <code>rating_diff</code>
-            correlated <em>negatively</em> with winning (impossible for chess).
-            Root cause traced to a regex that was capturing the first
-            4 digits of the 8-digit USCF ID instead of the rating after
-            <code>R:</code>.
-            </p>
-            <p style="line-height:1.5;">After re-parsing the local HTML cache
-            (no re-scrape), correlation flipped to <strong style="color:var(--cyan-main)">+0.49</strong>,
-            and test AUC jumped from <strong style="color:var(--red-soft)">0.67</strong>
-            to <strong style="color:var(--cyan-main)">0.82</strong>. See
-            <em>07 // DATA REPAIR LOG</em>.</p>
-            """,
-            variant="warning",
-        )
+    # ------- Why this matters -------
+    hud_card(
+        "WHY THIS PROJECT MATTERS",
+        """
+        <p style="font-size:1.02rem; line-height:1.6;">
+        Most chess players prepare for an opponent by glancing at one number:
+        their rating. But rating is a snapshot — it doesn't tell you
+        whether the opponent is in <em>hot form</em>, <em>rusty</em>,
+        <em>improving fast</em>, or <em>dangerous against stronger players</em>.
+        </p>
+        <p style="font-size:1.02rem; line-height:1.6;">
+        This dashboard goes beyond rating. It predicts who is favored to win,
+        but more importantly it explains
+        <strong style="color:var(--gold-accent)">what kind of opponent you are
+        facing</strong> — and gives you practical preparation ideas based on
+        their profile.
+        </p>
+        """,
+        variant="success",
+    )
+
+    # ------- The 6-step process flow -------
+    render_html('<div class="hud-meta" style="margin-top:1.2rem;">>> PROJECT PROCESS  ·  HOW WE BUILT IT</div>')
+    steps = [
+        ("01", "COLLECT",
+         "We collected public United States Chess Federation tournament pages "
+         "and converted them into a structured game-level dataset. Because the "
+         "source pages are messy crosstables instead of clean tables, this "
+         "required a custom parser and local HTML cache."),
+        ("02", "CLEAN",
+         "Raw rows were checked for duplicates, invalid dates, and missing "
+         "ratings. A serious parser bug was discovered and fixed (see Data "
+         "Repair Log), which corrected the rating signal across the entire "
+         "dataset. Final cleaned dataset: 8,514 modeled games."),
+        ("03", "ENGINEER VARIABLES",
+         "From the cleaned games we built features the model can learn from: "
+         "player rating, opponent rating, rating difference, time control, "
+         "recent activity, and recent win rate. See Feature Vectors."),
+        ("04", "TRAIN MODELS",
+         "Logistic Regression as the benchmark, plus Random Forest and "
+         "Gradient Boosting as stronger machine-learning models. We also "
+         "compare against the Elo formula — the closed-form baseline that "
+         "chess has used since the 1970s."),
+        ("05", "EVALUATE",
+         "We split the data chronologically so the model is always tested "
+         "on games it has never seen, and use 5-fold time-aware "
+         "cross-validation to make sure the result is stable. Reported "
+         "metrics: AUC, F1, Accuracy, Precision, Recall."),
+        ("06", "SCOUT",
+         "On top of the model, the scouting layer answers the harder question: "
+         "what kind of opponent is this? It produces a 0–100 Underrated "
+         "Potential score, plain-English profile cards, and practical chess "
+         "preparation ideas for the matchup."),
+    ]
+    for i in range(0, len(steps), 2):
+        cols = st.columns(2)
+        for j, (num, title, body) in enumerate(steps[i:i + 2]):
+            with cols[j]:
+                hud_card(
+                    f"STEP {num}  ·  {title}",
+                    f'<p style="font-size:0.98rem; line-height:1.55;">{body}</p>',
+                )
+
+    # ------- Honest finding -------
+    divider()
+    hud_card(
+        "HEADLINE FINDING  ·  WHAT THE NUMBERS SAY",
+        """
+        <p style="font-size:1.02rem; line-height:1.6;">
+        Across our test set, every model scored within ~0.002 AUC of each
+        other — including the simple Elo formula at
+        <strong style="color:var(--cyan-main)">0.825</strong>. The
+        machine-learning pipeline matches Elo's predictive power without
+        claiming to beat it.
+        </p>
+        <p style="font-size:1.02rem; line-height:1.6;">
+        That's the honest framing: Elo is extremely strong for chess
+        prediction because rating already captures most of what's
+        predictable. The real product value is one layer up — turning
+        the same data into a
+        <strong style="color:var(--gold-accent)">scouting report</strong>
+        that explains what kind of opponent is on the other side of the
+        board.
+        </p>
+        """,
+        variant="gold",
+    )
+
+    # ------- Rubric map (presentation-ready) -------
+    divider()
+    render_html('<div class="hud-meta">>> RUBRIC MAP  ·  HOW THIS PROJECT MEETS THE CLASS REQUIREMENTS</div>')
+
+    rubric_rows = [
+        ("Novel dataset (not Kaggle)",        "Public United States Chess Federation tournament crosstables, scraped + cached locally."),
+        ("Cleaning",                          "Parser-bug repair, date / rating validation, duplicate handling, leakage controls."),
+        ("EDA",                               "Distribution charts, correlation matrix, redundancy audit (rating_diff vs raw ratings)."),
+        ("Benchmark model",                   "Logistic Regression on rating_diff + time_control."),
+        ("ML comparison",                     "Random Forest, Gradient Boosting, and an Elo zero-shot baseline."),
+        ("Validation",                        "Chronological 70 / 15 / 15 train / val / test plus 5-fold TimeSeriesSplit CV."),
+        ("Presentation value",                "This live dashboard — Cyberdeck-themed scouting interface with 7 pages."),
+        ("Extra credit (Generative-AI comparison)",
+                                              "Elo zero-shot baseline on the same held-out test set; optional Claude API path documented."),
+    ]
+    th_style = ("color:var(--cyan-soft);text-align:left;padding:0.55rem 0.8rem;"
+                "border-bottom:1px solid var(--cyan-muted);"
+                "text-transform:uppercase;letter-spacing:0.08em;font-family:'Share Tech Mono',monospace;"
+                "font-size:0.78rem;")
+    td_l = ("padding:0.55rem 0.8rem;border-bottom:1px solid rgba(122,247,255,0.10);"
+            "font-family:'Share Tech Mono',monospace;font-size:0.85rem;"
+            "color:var(--cyan-main);")
+    td_r = ("padding:0.55rem 0.8rem;border-bottom:1px solid rgba(122,247,255,0.10);"
+            "font-size:0.95rem;color:var(--text-main);line-height:1.5;")
+    rows_html = "".join(
+        f"<tr><td style='{td_l}'>{req}</td><td style='{td_r}'>{where}</td></tr>"
+        for req, where in rubric_rows
+    )
+    render_html(
+        '<table style="width:100%;border-collapse:collapse;margin-top:0.4rem;">'
+        f'<thead><tr><th style="{th_style}">Rubric Requirement</th>'
+        f'<th style="{th_style}">Where This Project Shows It</th></tr></thead>'
+        f'<tbody>{rows_html}</tbody></table>'
+    )
+
+    # ------- Soft pointer to the data-quality story -------
+    divider()
+    hud_card(
+        "DATA QUALITY ALERT  ·  THE PARSER STORY",
+        """
+        <p style="font-size:1.0rem; line-height:1.6;">
+        During exploratory analysis the rating advantage appeared to <em>hurt</em>
+        the chance of winning — impossible for chess. Tracing the issue
+        upstream revealed that the data parser was capturing part of the
+        player's USCF ID instead of the rating itself.
+        </p>
+        <p style="font-size:1.0rem; line-height:1.6;">
+        After fixing the parser and re-reading the cached pages, the rating
+        signal behaved correctly: rating advantage and winning correlated at
+        <strong style="color:var(--cyan-main)">+0.49</strong>, and test AUC
+        moved from <strong style="color:var(--red-soft)">0.67</strong> to
+        <strong style="color:var(--cyan-main)">0.82</strong>.
+        Full repair log on page <em>07 // DATA REPAIR LOG</em>.
+        </p>
+        """,
+        variant="warning",
+    )
 
 
 # ============================================================================
@@ -850,9 +1073,28 @@ def page_command_center():
 # ============================================================================
 def page_model_intel():
     hud_header(
-        "MODEL INTEL  ·  PHASE 12 TUNING",
-        "Outcome Prediction Performance",
-        "Held-out 1,278-game chronological test set. Per-fold AUC std ≤ 0.015.",
+        "MODEL INTEL  ·  PREDICTION RESULTS",
+        "How well do the models predict game outcomes?",
+        "All metrics are reported on a held-out test set of 1,278 games the model never saw during training.",
+    )
+
+    # ------- What the metrics mean (plain English) -------
+    hud_card(
+        "WHAT THE METRICS MEAN",
+        """
+        <p style="font-size:1.0rem; line-height:1.6;">
+        <strong style="color:var(--cyan-main)">AUC</strong> — how well the model
+        separates likely wins from likely losses (higher is better; 0.5 = random).<br/>
+        <strong style="color:var(--cyan-main)">Accuracy</strong> — the percentage
+        of predictions the model gets right.<br/>
+        <strong style="color:var(--cyan-main)">F1 Score</strong> — a balanced
+        score for both missed wins and false alarms.<br/>
+        <strong style="color:var(--cyan-main)">Precision</strong> — when the
+        model says "win," how often it is correct.<br/>
+        <strong style="color:var(--cyan-main)">Recall</strong> — of the actual
+        wins, how many the model identifies.
+        </p>
+        """,
     )
 
     metrics = load_kfold_metrics()
@@ -863,65 +1105,101 @@ def page_model_intel():
 
     test_rows = metrics[metrics["split"] == "Test"].copy()
     headline = test_rows[["model", "cv_mean_roc_auc", "roc_auc", "f1", "accuracy", "precision", "recall"]] \
-        .rename(columns={"roc_auc": "test_auc", "cv_mean_roc_auc": "cv_auc"})
+        .rename(columns={
+            "model": "Model",
+            "cv_mean_roc_auc": "CV AUC",
+            "roc_auc": "Test AUC",
+            "f1": "F1",
+            "accuracy": "Accuracy",
+            "precision": "Precision",
+            "recall": "Recall",
+        })
 
     if genai is not None:
         elo = genai[genai["approach"].str.startswith("Elo")].iloc[0]
         elo_row = pd.DataFrame([{
-            "model": "Elo zero-shot baseline",
-            "cv_auc": np.nan, "test_auc": elo["roc_auc"],
-            "f1": elo["f1"], "accuracy": elo["accuracy"],
-            "precision": elo["precision"], "recall": elo["recall"],
+            "Model": "Elo Baseline",
+            "CV AUC": np.nan, "Test AUC": elo["roc_auc"],
+            "F1": elo["f1"], "Accuracy": elo["accuracy"],
+            "Precision": elo["precision"], "Recall": elo["recall"],
         }])
         full = pd.concat([headline, elo_row], ignore_index=True)
     else:
         full = headline
 
-    st.markdown('<div class="hud-meta">>> COMPARISON TABLE</div>', unsafe_allow_html=True)
-    fmt = {c: "{:.4f}" for c in ["cv_auc", "test_auc", "f1", "accuracy", "precision", "recall"]}
+    render_html('<div class="hud-meta">>> MODEL COMPARISON  ·  TEST PERFORMANCE</div>')
+    fmt = {c: "{:.4f}" for c in ["CV AUC", "Test AUC", "F1", "Accuracy", "Precision", "Recall"]}
     st.dataframe(
         full.style
             .format(fmt, na_rep="—")
-            .background_gradient(subset=["test_auc"], cmap="Greens"),
+            .background_gradient(subset=["Test AUC"], cmap="Greens"),
         width="stretch", hide_index=True,
+    )
+    render_html(
+        '<p style="font-size:1.0rem; line-height:1.55;">'
+        '<strong style="color:var(--cyan-main);">Summary.</strong> '
+        'All models perform similarly, with Test AUC around <strong>0.82–0.83</strong>. '
+        'This means rating is already a very strong predictor of the outcome. '
+        'The machine-learning models add value by also looking at recent activity and form.'
+        '</p>'
     )
 
     cL, cR = st.columns(2)
     with cL:
         fig = px.bar(
-            full.sort_values("test_auc"),
-            x="test_auc", y="model", orientation="h",
+            full.sort_values("Test AUC"),
+            x="Test AUC", y="Model", orientation="h",
             range_x=[0.5, 0.9],
-            color="test_auc", color_continuous_scale=[(0, "#2D8F95"), (1, "#7AF7FF")],
-            title="TEST ROC-AUC BY MODEL",
+            color="Test AUC", color_continuous_scale=[(0, "#2D8F95"), (1, "#7AF7FF")],
+            title="Test Performance by Model",
         )
         fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, height=380,
-                          coloraxis_showscale=False)
+                          coloraxis_showscale=False,
+                          xaxis_title="Test AUC (higher is better)",
+                          yaxis_title="")
         st.plotly_chart(fig, width="stretch")
 
     with cR:
         folds = load_per_fold()
         if folds is not None:
             fig2 = px.box(folds, x="model", y="val_roc_auc",
-                          title="PER-FOLD VALIDATION AUC (5-FOLD TIME-SERIES CV)",
+                          title="Cross-Validation Stability (5 time-aware folds)",
                           points="all", color_discrete_sequence=["#7AF7FF"])
-            fig2.update_layout(**PLOTLY_LAYOUT, height=380, yaxis_title="ROC-AUC")
+            fig2.update_layout(**PLOTLY_LAYOUT, height=380,
+                               yaxis_title="Validation AUC",
+                               xaxis_title="Model")
             st.plotly_chart(fig2, width="stretch")
+            render_html(
+                '<p style="font-size:0.95rem; line-height:1.5; color:var(--text-muted);">'
+                'Cross-validation means we re-tested the model on five different time-based '
+                'slices of the training data. The narrow boxes show that performance is '
+                '<strong style="color:var(--cyan-main);">stable</strong>, not lucky.'
+                '</p>'
+            )
 
     divider()
 
     hud_card(
-        "HONEST FRAMING  ·  DO NOT OVERCLAIM",
+        "HONEST FRAMING  ·  ML MATCHES ELO",
         """
-        <p>All three ML models (Logistic, Random Forest, Gradient Boosting)
-        land within <strong>~0.002 AUC</strong> of the closed-form Elo formula
-        on the test set. That is the <em>correct</em> finding: a 70-year-old
-        domain baseline is extremely strong, and our pipeline is honest enough
-        to match it without faking an improvement.</p>
-        <p style="color:var(--gold-accent)">
+        <p style="font-size:1.02rem; line-height:1.6;">
+        All three ML models land within about <strong>0.002 AUC</strong>
+        of the closed-form Elo formula on the test set. That is the
+        <em>correct</em> finding — Elo has been the gold standard in chess
+        prediction since the 1970s because rating already captures most
+        of what's predictable about a game.
+        </p>
+        <p style="font-size:1.02rem; line-height:1.6;">
+        The goal here was never to beat Elo at all costs. Elo provides
+        a strong baseline; the machine-learning pipeline matches that
+        baseline while adding recent activity, form, and other context
+        that flow into the scouting layer.
+        </p>
+        <p style="font-size:1.02rem; line-height:1.6; color:var(--gold-accent);">
         <strong>Product value lives one layer above prediction</strong>
-        &mdash; in the scouting intelligence that explains <em>why</em> a
-        matchup is interesting, not just <em>who</em> is favored.</p>
+        &mdash; in the scouting intelligence that explains <em>what kind
+        of opponent</em> you are facing, not just who is favored.
+        </p>
         """,
         variant="gold",
     )
@@ -932,74 +1210,140 @@ def page_model_intel():
 # ============================================================================
 def page_feature_vectors():
     hud_header(
-        "FEATURE VECTORS  ·  INPUT INTEL",
-        "What the model actually sees",
-        "Each feature explained in plain English with its scouting interpretation.",
+        "FEATURE VECTORS  ·  WHAT THE MODEL LEARNS FROM",
+        "Variables explained in plain English",
+        "These are the inputs the prediction model uses, with friendly names and what each one tells us.",
     )
 
+    # plain_name, column, family, meaning, why_it_matters, example
     feature_docs = [
-        ("player_pre_rating",     "Rating",     "Focal player's USCF rating coming into the game.",                        "Strongest single signal of skill — but static; doesn't know if you're sharp or rusty."),
-        ("opponent_pre_rating",   "Rating",     "Opponent's USCF rating coming into the game.",                            "Half of the matchup; tree models also learn it directly, not just via the difference."),
-        ("rating_diff",           "Rating",     "player_pre_rating − opponent_pre_rating.",                                "Single strongest predictor — ~55% of tree importance on its own."),
-        ("time_control",          "Format",     "Regular / Quick / Blitz / Unknown.",                                      "Skill is partially time-control-specific; blitz specialists ≠ classical grinders."),
-        ("player_games_last_30d", "Activity",   "Volume of games in last 30 days.",                                        "Short-term form / rust indicator."),
-        ("player_games_last_90d", "Activity",   "Volume over 90 days.",                                                    "Best balanced activity window; most predictive of the three."),
-        ("player_games_last_365d","Activity",   "Annual game volume.",                                                     "Separates committed tournament players from casual entrants."),
-        ("player_recent_avg_opponent_rating_90d", "Recent Form", "Average opponent strength faced in last 90 days.",        "Are recent results against tough or soft fields?"),
-        ("player_recent_win_rate_90d", "Recent Form", "90-day win rate.",                                                  "Direct momentum signal — hot, cold, or stable?"),
-        ("missing_recent_avg_opp_90d", "Cold-Start", "Flag for players with no recent opponents at all.",                  "Tells the model to discount recency features rather than impute silently."),
-        ("missing_recent_win_rate_90d","Cold-Start", "Flag for players with no recent results to summarize.",              "Same idea — explicit missingness > silent fill."),
+        ("Player Rating",                "player_pre_rating",     "Rating",
+         "The player's USCF rating coming into the game.",
+         "Stronger players usually win more often — this is the single biggest signal.",
+         "Rating 1900 going into a tournament round."),
+        ("Opponent Rating",              "opponent_pre_rating",   "Rating",
+         "The opponent's USCF rating coming into the game.",
+         "Half of the matchup. Helps describe how hard the game is.",
+         "Opponent rated 2050."),
+        ("Rating Difference",            "rating_diff",           "Rating",
+         "Player rating minus opponent rating.",
+         "Quick summary of who is favored. Positive = player is the higher-rated side.",
+         "+150 means the player is rated 150 points higher than their opponent."),
+        ("Time Control",                 "time_control",          "Time Control",
+         "Whether the game was Regular, Quick, or Blitz.",
+         "Players are not equally good in all formats — blitz specialists are different from classical grinders.",
+         "Blitz, Quick, Regular, or Unknown."),
+        ("Recent Games (30 days)",       "player_games_last_30d", "Activity",
+         "Number of rated games played in the last 30 days.",
+         "A short-term snapshot of how active and warmed up the player is right now.",
+         "12 games in 30 days = very recent activity."),
+        ("Recent Games (90 days)",       "player_games_last_90d", "Activity",
+         "Number of rated games played in the last 90 days.",
+         "The most balanced activity window. Active players are usually sharper.",
+         "20 games in 90 days = consistently active."),
+        ("Recent Games (365 days)",      "player_games_last_365d","Activity",
+         "Number of rated games played in the last year.",
+         "Separates committed tournament players from casual entrants.",
+         "80 games in a year = serious tournament player."),
+        ("Recent Opponent Strength",     "player_recent_avg_opponent_rating_90d", "Recent Form",
+         "Average rating of opponents the player has faced in the last 90 days.",
+         "Tells us if recent results came against strong or weak fields.",
+         "Avg 2100 = battle-tested against strong players."),
+        ("Recent Win Rate",              "player_recent_win_rate_90d", "Recent Form",
+         "How often the player has been winning recently (last 90 days).",
+         "Helps show whether a player may be hot, cold, or stable.",
+         "65% win rate over 90 days = currently in good form."),
+        ("Cold-Start Flag — opponents",  "missing_recent_avg_opp_90d", "Cold Start",
+         "A marker for players who have no recent opponents on file at all.",
+         "Tells the model to be cautious about recent-form features rather than guess.",
+         "Set to 1 when there is no recent-opponent data to summarize."),
+        ("Cold-Start Flag — results",    "missing_recent_win_rate_90d", "Cold Start",
+         "A marker for players with no recent results to summarize.",
+         "Same idea — explicit missingness is more honest than silently filling in a number.",
+         "Set to 1 when there is no recent win-rate data."),
     ]
 
-    family_colors = {"Rating": "", "Format": "", "Activity": "",
-                     "Recent Form": "", "Cold-Start": "danger"}
+    family_variant = {"Rating": "", "Time Control": "", "Activity": "",
+                      "Recent Form": "", "Cold Start": "danger"}
 
-    fams = sorted({f[1] for f in feature_docs})
-    selected = st.multiselect("FILTER BY SIGNAL CATEGORY", fams, default=fams)
+    fams = sorted({f[2] for f in feature_docs})
+    selected = st.multiselect("Filter by feature family", fams, default=fams)
 
-    # Grid of HUD cards
-    cards_per_row = 2
-    filtered = [f for f in feature_docs if f[1] in selected]
-    for i in range(0, len(filtered), cards_per_row):
-        cols = st.columns(cards_per_row)
-        for j, feat in enumerate(filtered[i:i + cards_per_row]):
-            name, fam, plain, why = feat
+    filtered = [f for f in feature_docs if f[2] in selected]
+    for i in range(0, len(filtered), 2):
+        cols = st.columns(2)
+        for j, feat in enumerate(filtered[i:i + 2]):
+            plain_name, column, fam, meaning, why, example = feat
             with cols[j]:
                 hud_card(
-                    f"[ {fam.upper()} SIGNAL ]",
+                    f"[ {fam.upper()} ]",
                     f"""
-                    <div style="font-family:'Share Tech Mono',monospace;
-                                color:var(--cyan-main);font-size:1.05rem;
-                                margin-bottom:0.4rem;">{name}</div>
-                    <div style="color:var(--text-muted);font-size:0.82rem;
-                                margin-bottom:0.4rem;">PLAIN MEANING</div>
-                    <p style="margin:0 0 0.6rem 0;">{plain}</p>
-                    <div style="color:var(--text-muted);font-size:0.82rem;
-                                margin-bottom:0.4rem;">WHY IT MATTERS</div>
-                    <p style="margin:0;">{why}</p>
+                    <div style="color:var(--cyan-main);font-size:1.15rem;font-weight:600;margin-bottom:0.15rem;">
+                      {plain_name}
+                    </div>
+                    <div style="font-family:'Share Tech Mono',monospace;color:var(--text-muted);font-size:0.78rem;letter-spacing:0.08em;margin-bottom:0.6rem;">
+                      column: <span style="color:var(--cyan-soft);">{column}</span>
+                    </div>
+                    <div style="color:var(--text-muted);font-size:0.78rem;letter-spacing:0.1em;margin-bottom:0.2rem;text-transform:uppercase;">Plain meaning</div>
+                    <p style="margin:0 0 0.55rem 0;font-size:0.98rem;line-height:1.5;">{meaning}</p>
+                    <div style="color:var(--text-muted);font-size:0.78rem;letter-spacing:0.1em;margin-bottom:0.2rem;text-transform:uppercase;">Why it matters</div>
+                    <p style="margin:0 0 0.55rem 0;font-size:0.98rem;line-height:1.5;">{why}</p>
+                    <div style="color:var(--text-muted);font-size:0.78rem;letter-spacing:0.1em;margin-bottom:0.2rem;text-transform:uppercase;">Example</div>
+                    <p style="margin:0;font-size:0.95rem;line-height:1.5;color:var(--cyan-soft);"><em>{example}</em></p>
                     """,
-                    variant=family_colors.get(fam, ""),
+                    variant=family_variant.get(fam, ""),
                 )
 
     divider()
 
     fi = load_feature_importances()
     if fi is not None:
-        st.markdown('<div class="hud-meta">>> FEATURE IMPORTANCE (RANDOM FOREST)</div>',
-                    unsafe_allow_html=True)
-        rf_imp = fi[fi["model"] == "RandomForest"].sort_values("importance", ascending=True).tail(15)
+        render_html('<div class="hud-meta">>> FEATURE IMPORTANCE  ·  WHICH SIGNALS THE MODEL RELIES ON MOST</div>')
+
+        # Map technical column names to friendly labels in the chart
+        friendly = {
+            "player_pre_rating": "Player Rating",
+            "opponent_pre_rating": "Opponent Rating",
+            "rating_diff": "Rating Difference",
+            "player_games_last_30d": "Recent Games (30d)",
+            "player_games_last_90d": "Recent Games (90d)",
+            "player_games_last_365d": "Recent Games (365d)",
+            "player_recent_avg_opponent_rating_90d": "Recent Opponent Strength",
+            "player_recent_win_rate_90d": "Recent Win Rate",
+            "missing_recent_avg_opp_90d": "Cold-Start (opponents)",
+            "missing_recent_win_rate_90d": "Cold-Start (results)",
+            "time_control_Quick": "Time Control: Quick",
+            "time_control_Regular": "Time Control: Regular",
+            "time_control_Unknown": "Time Control: Unknown",
+        }
+        rf_imp = fi[fi["model"] == "RandomForest"].copy()
+        rf_imp["feature_label"] = rf_imp["feature"].map(friendly).fillna(rf_imp["feature"])
+        rf_imp = rf_imp.sort_values("importance", ascending=True).tail(10)
         fig = px.bar(
-            rf_imp, x="importance", y="feature", orientation="h",
+            rf_imp, x="importance", y="feature_label", orientation="h",
             color="importance",
             color_continuous_scale=[(0, "#2D8F95"), (1, "#7AF7FF")],
+            title="Most Important Features (Random Forest)",
         )
-        fig.update_layout(**PLOTLY_LAYOUT, height=480,
-                          showlegend=False, coloraxis_showscale=False)
+        fig.update_layout(**PLOTLY_LAYOUT, height=460,
+                          showlegend=False, coloraxis_showscale=False,
+                          xaxis_title="Importance (higher = more influence on the prediction)",
+                          yaxis_title="")
         st.plotly_chart(fig, width="stretch")
+        render_html(
+            '<p style="font-size:1.0rem; line-height:1.6;">'
+            '<strong style="color:var(--cyan-main);">Summary.</strong> '
+            'Rating Difference is by far the biggest signal — about 55% of the '
+            'model\'s decision is driven by who is the higher-rated side. '
+            'Recent activity and recent win rate add useful context (~13% combined), '
+            'but they do not replace rating. The cold-start flags tell the model '
+            'when to <em>discount</em> recency features rather than pretend they exist.'
+            '</p>'
+        )
         st.markdown(
             '<div style="color:var(--text-muted);font-size:0.85rem;">'
-            'Recency / activity features collectively carry ~13% of tree importance — '
-            'secondary but consistent. Story: <em>rating dominates, momentum fine-tunes</em>.'
+            'Rating dominates, momentum fine-tunes — this matches what the chess literature '
+            'reports about rating-based prediction.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -1048,14 +1392,13 @@ def page_player_dossier():
         m4.metric("UNDERRATED POTENTIAL", f"{s['underrated_score']:.0f}/100",
                   s.get("bucket_label"))
     else:
-        m4.metric("UNDERRATED POTENTIAL", "INSUFF DATA")
+        m4.metric("UNDERRATED POTENTIAL", "—")
 
-    if row.get("small_sample_warning") or (s is not None and s.get("bucket_label") == "Insufficient data"):
-        st.markdown(
-            f'<div class="hud-card hud-warning"><div class="hud-meta">⚠ SAMPLE-SIZE WARNING</div>'
-            f'<p>Limited recent or career data. Treat all scouting numbers as <em>preliminary</em>.</p></div>',
-            unsafe_allow_html=True,
-        )
+    # Soft data advisory — never hard-block. Show what we know, flag what to
+    # interpret carefully.
+    advisory_text = s.get("data_advisory") if s is not None else None
+    if advisory_text:
+        hud_card("DATA ADVISORY", f'<p style="font-size:0.98rem; line-height:1.55;">{advisory_text}</p>')
 
     divider()
 
@@ -1191,6 +1534,37 @@ def page_player_dossier():
             """,
         )
 
+    # ------- Plain-English player summary paragraph -------
+    divider()
+    rating = row.get("current_rating")
+    career = row.get("career_n_games") or 0
+    g90 = row.get("games_last_90d") or 0
+    wr90 = row.get("recent_win_rate_90d")
+    wr_phrase = f"{wr90*100:.0f}% recent win rate" if pd.notna(wr90) else "no recent win rate yet"
+    tc_label = row.get("time_control_specialist_label") or "balanced across time controls"
+    advisory_text = s.get("data_advisory") if s is not None else ""
+
+    hud_card(
+        "WRITTEN PLAYER SUMMARY",
+        f"""
+        <p style="font-size:1.02rem; line-height:1.6;">
+        This player is currently rated
+        <strong style="color:var(--cyan-main)">{_fmt_int(rating)}</strong> with
+        <strong>{career}</strong> career games on file and
+        <strong>{g90}</strong> games in the last 90 days
+        ({wr_phrase}). Their time-control profile is
+        <strong>{tc_label.lower()}</strong>.
+        </p>
+        <p style="font-size:1.02rem; line-height:1.6; color:var(--text-muted);">
+        {advisory_text}
+        </p>
+        """,
+    )
+
+    # ------- Practical chess prep ideas (coaching card) -------
+    render_coaching_card(row.to_dict(), s.to_dict() if s is not None else None,
+                         heading="PRACTICAL CHESS PREP IDEAS  ·  IF YOU'RE FACING THIS PLAYER")
+
 
 # ============================================================================
 # PAGE 5 — Underrated Protocol
@@ -1225,8 +1599,28 @@ def _gauge(value: float, max_value: float = 100.0, title: str = "UNDERRATED POTE
 def page_underrated_protocol():
     hud_header(
         "UNDERRATED PROTOCOL  ·  THREAT SCORING",
-        "Rule-based 0–100 Underrated Potential",
-        'Six interpretable subscores with sample-size guardrails. We never claim "smurf" — we say "may be playing above rating."',
+        "Underrated Potential Score (0–100)",
+        "An estimate of whether a player may currently be performing above their official rating.",
+    )
+
+    # ------- Plain-English explanation up front -------
+    hud_card(
+        "WHAT THIS SCORE MEANS",
+        """
+        <p style="font-size:1.02rem; line-height:1.6;">
+        The <strong style="color:var(--cyan-main)">Underrated Potential</strong>
+        score estimates whether a player may currently be performing above
+        their official rating, based on six interpretable signals:
+        recent results against stronger opponents (upset), recent win rate
+        (form), rating movement (momentum), strength of schedule, activity,
+        and result-by-result volatility.
+        </p>
+        <p style="font-size:1.02rem; line-height:1.6;">
+        It is <strong>not</strong> an accusation. We use the phrase
+        "may be playing above rating" or "rating may be lagging behind
+        current strength" — not "smurf."
+        </p>
+        """,
     )
 
     profiles = load_profiles()
@@ -1244,23 +1638,19 @@ def page_underrated_protocol():
         gauge_val = float(sc["underrated_score"]) if (sc is not None and pd.notna(sc.get("underrated_score"))) else 0
         st.plotly_chart(_gauge(gauge_val), width="stretch")
         if sc is not None:
-            badge_var = "gold" if gauge_val >= 70 else "danger" if sc.get("bucket_label") == "Insufficient data" else ""
-            st.markdown(
-                f'<div style="text-align:center;">{pill(sc.get("bucket_label","—"), badge_var)}</div>',
-                unsafe_allow_html=True,
+            badge_var = "gold" if gauge_val >= 70 else "danger" if sc.get("bucket_label") == "No data on file" else ""
+            render_html(
+                f'<div style="text-align:center;">{pill(sc.get("bucket_label","—"), badge_var)}</div>'
             )
 
     with cI:
-        if sc is None or sc.get("bucket_label") == "Insufficient data":
+        if sc is None or sc.get("underrated_score") is None or pd.isna(sc.get("underrated_score")):
             hud_card(
-                "INSUFFICIENT DATA",
+                "NO DATA ON FILE",
                 f"""
                 <p>This player has <strong>{_fmt_int(row.get('career_n_games'))}</strong>
-                career games and <strong>{_fmt_int(row.get('games_last_90d'))}</strong>
-                in the last 90 days. The underrated-potential score requires a minimum
-                sample before we trust it.</p>
-                <p style="color:var(--text-muted);">Pick a player with denser
-                tournament history to see a meaningful gauge breakdown.</p>
+                career games on file. The Underrated Potential score requires at least
+                one career game to compute meaningful signals.</p>
                 """,
                 variant="warning",
             )
@@ -1274,6 +1664,31 @@ def page_underrated_protocol():
             bars.append(hud_progress(f"VOLATILITY ({sc['volatility_score']:.1f}/10)", sc["volatility_score"] * 100 / 10))
             hud_card(f"COMPONENT BREAKDOWN  ·  ×{sc['sample_size_multiplier']:.2f} SAMPLE-SIZE MULTIPLIER",
                      "\n".join(bars))
+
+    # ------- Data advisory (always shown — softer than before) -------
+    if sc is not None and sc.get("data_advisory"):
+        hud_card("DATA ADVISORY", f'<p style="font-size:0.98rem; line-height:1.55;">{sc["data_advisory"]}</p>')
+
+    # ------- Plain-English summary -------
+    if sc is not None and pd.notna(sc.get("underrated_score")):
+        bucket = sc.get("bucket_label", "")
+        summary_text = (
+            f"This player scores <strong>{sc['underrated_score']:.0f} / 100</strong> on "
+            f"Underrated Potential — <em>{bucket.lower()}</em>. "
+        )
+        top_components = sorted(
+            [("Upset", sc["upset_score"]),
+             ("Recent Form", sc["form_score"]),
+             ("Momentum", sc["momentum_score"]),
+             ("Schedule", sc["schedule_score"]),
+             ("Activity", sc["activity_score"]),
+             ("Volatility", sc["volatility_score"])],
+            key=lambda t: -t[1],
+        )[:2]
+        if any(v >= 6 for _, v in top_components):
+            top_names = ", ".join(n for n, v in top_components if v >= 6)
+            summary_text += f"Strongest contributing signals: <strong>{top_names}</strong>."
+        hud_card("WHAT THE SCORE SAYS", f'<p style="font-size:1.0rem; line-height:1.6;">{summary_text}</p>')
 
     if sc is not None and sc.get("highlight_signals"):
         divider()
@@ -1467,6 +1882,22 @@ def page_matchup_sim():
 
         divider()
         hud_card("MATCHUP OUTLOOK  ·  PLAIN ENGLISH", _outlook_text(report), variant="success")
+
+        # ------- Practical chess prep ideas, derived from the opponent -------
+        # Pull the opponent's profile + scouting score for the coaching helper.
+        opp_profile_row = profiles[profiles["player_id"] == o_id]
+        opp_score_row = None
+        opp_prof_dict = None
+        if not opp_profile_row.empty:
+            opp_prof_dict = opp_profile_row.iloc[0].to_dict()
+            scores_df = load_scores()
+            if scores_df is not None:
+                m = scores_df[scores_df["player_id"] == o_id]
+                if not m.empty:
+                    opp_score_row = m.iloc[0].to_dict()
+        if opp_prof_dict:
+            render_coaching_card(opp_prof_dict, opp_score_row,
+                                 heading="PRACTICAL CHESS PREP IDEAS  ·  FOR THIS MATCHUP")
 
 
 # ============================================================================
