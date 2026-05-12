@@ -1301,17 +1301,30 @@ def page_model_intel():
             "recall": "Recall",
         })
 
+    extra_rows = []
     if genai is not None:
-        elo = genai[genai["approach"].str.startswith("Elo")].iloc[0]
-        elo_row = pd.DataFrame([{
-            "Model": "Elo Baseline",
-            "CV AUC": np.nan, "Test AUC": elo["roc_auc"],
-            "F1": elo["f1"], "Accuracy": elo["accuracy"],
-            "Precision": elo["precision"], "Recall": elo["recall"],
-        }])
-        full = pd.concat([headline, elo_row], ignore_index=True)
-    else:
-        full = headline
+        # Always include the Elo zero-shot baseline if present
+        elo_mask = genai["approach"].str.startswith("Elo")
+        if elo_mask.any():
+            elo = genai[elo_mask].iloc[0]
+            extra_rows.append({
+                "Model": "Elo Baseline",
+                "CV AUC": np.nan, "Test AUC": elo["roc_auc"],
+                "F1": elo["f1"], "Accuracy": elo["accuracy"],
+                "Precision": elo["precision"], "Recall": elo["recall"],
+            })
+        # And the Claude inline-reasoning row (extra credit) if present
+        claude_mask = genai["approach"].str.contains("Claude", case=False, na=False)
+        if claude_mask.any():
+            claude = genai[claude_mask].iloc[0]
+            n_claude = int(claude.get("n_test_rows") or 0)
+            extra_rows.append({
+                "Model": f"Claude Opus 4.7 (LLM, n={n_claude})",
+                "CV AUC": np.nan, "Test AUC": claude["roc_auc"],
+                "F1": claude["f1"], "Accuracy": claude["accuracy"],
+                "Precision": claude["precision"], "Recall": claude["recall"],
+            })
+    full = pd.concat([headline, pd.DataFrame(extra_rows)], ignore_index=True) if extra_rows else headline
 
     render_html('<div class="hud-meta">>> MODEL COMPARISON  ·  TEST PERFORMANCE</div>')
     fmt = {c: "{:.4f}" for c in ["CV AUC", "Test AUC", "F1", "Accuracy", "Precision", "Recall"]}
