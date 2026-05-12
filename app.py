@@ -18,6 +18,7 @@ Visual identity: cyberdeck/HUD terminal (deep burgundy + cyan + coral).
 
 import importlib.util
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -528,30 +529,50 @@ def load_per_fold() -> pd.DataFrame | None:
 # ============================================================================
 # HUD primitive helpers (HTML fragments)
 # ============================================================================
+def _flatten_html(s: str) -> str:
+    """Collapse blank lines and leading-whitespace inside an HTML fragment.
+
+    Streamlit / CommonMark treats a blank line inside an HTML block as the
+    end of that block — anything after is re-parsed as markdown and shows up
+    as escaped text on the page.  Stripping blank lines and the leading
+    indentation makes the fragment a single uninterrupted HTML block, which
+    `st.markdown(..., unsafe_allow_html=True)` renders correctly.
+    """
+    # Remove leading whitespace on each line so HTML starts in col 0
+    s = "\n".join(line.lstrip() for line in s.splitlines())
+    # Drop blank lines entirely
+    s = re.sub(r"\n\s*\n+", "\n", s)
+    return s.strip()
+
+
+def render_html(html: str):
+    """Render an HTML fragment safely through Streamlit's markdown channel."""
+    st.markdown(_flatten_html(html), unsafe_allow_html=True)
+
+
 def hud_header(eyebrow: str, title: str, subtitle: str = ""):
-    sub_html = f'<div style="color:var(--text-muted);font-size:1.0rem;margin-top:0.2rem;">{subtitle}</div>' if subtitle else ""
-    st.markdown(
-        f"""
+    sub_html = (
+        f'<div style="color:var(--text-muted);font-size:1.0rem;margin-top:0.2rem;">{subtitle}</div>'
+        if subtitle else ""
+    )
+    render_html(f"""
         <div style="margin:0.4rem 0 1.2rem 0;">
           <div class="hud-meta">{eyebrow}</div>
           <h1 style="margin:0;font-size:2.0rem;">{title}</h1>
           {sub_html}
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """)
 
 
 def hud_card(eyebrow: str, body_html: str, variant: str = ""):
     cls = "hud-card"
     if variant in ("warning", "success", "gold"):
         cls += f" hud-{variant}"
-    st.markdown(
-        f"""<div class="{cls}">
-              <div class="hud-meta">{eyebrow}</div>
-              {body_html}
-            </div>""",
-        unsafe_allow_html=True,
+    render_html(
+        f'<div class="{cls}">'
+        f'<div class="hud-meta">{eyebrow}</div>'
+        f'{_flatten_html(body_html)}'
+        f'</div>'
     )
 
 
@@ -642,8 +663,7 @@ def render_top_band():
     scanned = len(profiles) if profiles is not None else 0
     pct = (scanned / total * 100) if total else 0
 
-    st.markdown(
-        f"""
+    render_html(f"""
         <div class="cyber-topband">
           <div class="cyber-topband-row">
             <div class="left">
@@ -663,14 +683,11 @@ def render_top_band():
             <span class="pct">{pct:.0f}%&nbsp;&nbsp;·&nbsp;&nbsp;{scanned} / {total} PROFILES</span>
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """)
 
 
 def render_footer():
-    st.markdown(
-        """
+    render_html("""
         <div class="cyber-footer">
           <div class="cyber-barcode" style="margin-top:0;"></div>
           <div class="prompt" style="margin-top:0.5rem;">ROOT@USCF-CYBERDECK : ~ #&nbsp;</div>
@@ -681,9 +698,7 @@ def render_footer():
             RATING-TREND FIGURES MARKED "PROXY" ARE RECONSTRUCTED FROM PRE-RATING CHRONOLOGY
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """)
 
 
 # ============================================================================
@@ -703,21 +718,17 @@ if "active_page" not in st.session_state:
     st.session_state.active_page = NAV_ITEMS[0][0]
 
 with st.sidebar:
-    st.markdown(
-        """
+    render_html("""
         <div style="text-align:center; margin-bottom:0.6rem;">
           <div class="hud-meta" style="text-align:center;">USCF // NODE 0xC4</div>
           <h2 style="margin:0; font-size:1.45rem; line-height:1.0;">CYBERDECK<br/>SCOUT</h2>
-          <div style="color:var(--text-muted);font-size:0.75rem;letter-spacing:0.15em;
-                      font-family:'Share Tech Mono',monospace;">
+          <div style="color:var(--text-muted);font-size:0.75rem;letter-spacing:0.15em;font-family:'Share Tech Mono',monospace;">
             v1.0  ·  ACCESS GRANTED
           </div>
         </div>
         <div class="cyber-barcode" style="margin:0.4rem 0 0.8rem 0;"></div>
         <div class="hud-meta">ACCESS NODES</div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """)
 
     for page_key, icon, subtitle in NAV_ITEMS:
         is_active = (st.session_state.active_page == page_key)
@@ -734,13 +745,10 @@ with st.sidebar:
 
     page = st.session_state.active_page
 
-    st.markdown(
-        """
+    render_html("""
         <div class="hud-divider"></div>
         <div class="hud-meta">SYSTEM STATUS</div>
-        <div style="font-family:'Share Tech Mono',monospace;
-                    font-size:0.72rem;color:var(--text-muted);
-                    line-height:1.7;">
+        <div style="font-family:'Share Tech Mono',monospace;font-size:0.72rem;color:var(--text-muted);line-height:1.7;">
           MODEL_NODE ........ <span style="color:#5ED7D9;">ONLINE</span><br/>
           DATA_NODE ......... <span style="color:#5ED7D9;">ONLINE</span><br/>
           SCOUT_NODE ........ <span style="color:#5ED7D9;">ONLINE</span><br/>
@@ -749,9 +757,7 @@ with st.sidebar:
           CACHE_AGE ......... <span style="color:#A38560;">7d</span>
         </div>
         <div class="cyber-barcode red" style="margin-top:0.6rem;"></div>
-        """,
-        unsafe_allow_html=True,
-    )
+    """)
 
 
 # ============================================================================
@@ -1455,11 +1461,9 @@ def page_matchup_sim():
         divider()
         cL, cR = st.columns(2)
         with cL:
-            st.markdown(_opponent_card_html(report["player_card"], "PLAYER DOSSIER  ·  YOU"),
-                        unsafe_allow_html=True)
+            render_html(_opponent_card_html(report["player_card"], "PLAYER DOSSIER  ·  YOU"))
         with cR:
-            st.markdown(_opponent_card_html(report["opponent_card"], "OPPONENT DOSSIER"),
-                        unsafe_allow_html=True)
+            render_html(_opponent_card_html(report["opponent_card"], "OPPONENT DOSSIER"))
 
         divider()
         hud_card("MATCHUP OUTLOOK  ·  PLAIN ENGLISH", _outlook_text(report), variant="success")
