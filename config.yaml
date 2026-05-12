@@ -1,0 +1,15 @@
+project:
+  name: "USCF_Opponent_Scout"
+  data_dir: "data"
+
+collection:
+  seed_player_ids: 
+    - "12640800" # Hikaru Nakamura
+  resume_mode: true
+  history_years: 5
+  batch_target_usable_games: 10000
+  max_players: 5000
+  max_events_total: 20000
+  delay_between_requests_sec: 2.0
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  cache_html: true

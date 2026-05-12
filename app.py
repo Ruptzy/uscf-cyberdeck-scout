@@ -1,0 +1,1593 @@
+"""
+USCF Cyberdeck Scout — Dashboard
+================================
+A tactical chess-opponent scouting terminal built on top of the
+USCF MSA pipeline.  Renders prediction + scouting intelligence from
+cached/precomputed CSVs and model artifacts; never touches USCF live.
+
+Run locally:
+    streamlit run app.py
+
+Architecture:
+* All paths are relative to this file's directory — safe for deployment.
+* `st.cache_data` for CSV loads, `st.cache_resource` for the model.
+* Sidebar-driven navigation across seven HUD pages.
+
+Visual identity: cyberdeck/HUD terminal (deep burgundy + cyan + coral).
+"""
+
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+
+# ============================================================================
+# Paths (RELATIVE to this file for deployment portability)
+# ============================================================================
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data" / "processed"
+MODELS_DIR = BASE_DIR / "outputs" / "models"
+EDA_DIR = BASE_DIR / "outputs" / "eda"
+SCRIPTS_DIR = BASE_DIR / "scripts"
+
+
+# ============================================================================
+# Page config — must be the very first Streamlit call
+# ============================================================================
+st.set_page_config(
+    page_title="USCF Cyberdeck Scout",
+    page_icon="♟",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+
+# ============================================================================
+# Cyberdeck CSS
+# ============================================================================
+CYBERDECK_CSS = """
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg-main: #120812;
+    --bg-deep: #03070D;
+    --bg-panel: #1A0B14;
+    --bg-panel-alt: #102027;
+    --cyan-main: #7AF7FF;
+    --cyan-soft: #5ED7D9;
+    --cyan-muted: #2D8F95;
+    --red-main: #C0444A;
+    --red-dark: #7A2630;
+    --red-soft: #E05A5F;
+    --text-main: #D8FFFF;
+    --text-muted: #7FAFB4;
+    --text-warning: #FF7777;
+    --gold-accent: #A38560;
+  }
+
+  /* ----- Global app background ----- */
+  [data-testid="stAppViewContainer"] {
+    background:
+      radial-gradient(ellipse at top left, rgba(122,247,255,0.06), transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(192,68,74,0.08), transparent 55%),
+      linear-gradient(180deg, var(--bg-main) 0%, var(--bg-deep) 100%);
+    color: var(--text-main);
+    font-family: 'Rajdhani', sans-serif;
+  }
+  [data-testid="stHeader"] { background: transparent; }
+
+  /* faint scanline overlay */
+  [data-testid="stAppViewContainer"]::before {
+    content: "";
+    position: fixed; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(
+      0deg, rgba(122,247,255,0.025) 0 1px, transparent 1px 3px);
+    z-index: 9999;
+  }
+
+  /* ----- Sidebar ----- */
+  [data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #100712 0%, #07050A 100%);
+    border-right: 1px solid var(--cyan-muted);
+    box-shadow: 2px 0 16px rgba(122,247,255,0.07);
+  }
+  [data-testid="stSidebar"] * { color: var(--text-main); }
+  [data-testid="stSidebar"] .stRadio > label > div p {
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--cyan-soft);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 0.85rem;
+  }
+
+  /* ----- Typography ----- */
+  h1, h2, h3, h4, h5 {
+    font-family: 'Rajdhani', sans-serif;
+    color: var(--cyan-main);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    text-shadow: 0 0 6px rgba(122,247,255,0.4);
+  }
+  p, li, span, label { color: var(--text-main); }
+  .stCaption, [data-testid="stCaptionContainer"] { color: var(--text-muted) !important; }
+
+  /* ----- HUD blocks ----- */
+  .hud-meta {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--cyan-soft);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+    opacity: 0.85;
+  }
+  .hud-meta::before { content: ">> "; color: var(--cyan-muted); }
+
+  .hud-card {
+    background: linear-gradient(135deg, rgba(26,11,20,0.92), rgba(16,32,39,0.55));
+    border: 1px solid var(--cyan-muted);
+    box-shadow:
+      inset 0 0 14px rgba(122,247,255,0.08),
+      0 0 12px rgba(122,247,255,0.06);
+    padding: 1.1rem 1.2rem;
+    margin: 0.6rem 0;
+    clip-path: polygon(
+      14px 0, 100% 0,
+      100% calc(100% - 14px), calc(100% - 14px) 100%,
+      0 100%, 0 14px
+    );
+    border-radius: 2px;
+  }
+  .hud-card.hud-warning {
+    border-color: var(--red-main);
+    background: linear-gradient(135deg, rgba(60,12,16,0.92), rgba(40,8,14,0.55));
+    box-shadow:
+      inset 0 0 16px rgba(224,90,95,0.10),
+      0 0 14px rgba(192,68,74,0.18);
+  }
+  .hud-card.hud-warning .hud-meta { color: var(--red-soft); }
+  .hud-card.hud-success {
+    border-color: var(--cyan-soft);
+    box-shadow:
+      inset 0 0 18px rgba(122,247,255,0.12),
+      0 0 16px rgba(122,247,255,0.18);
+  }
+  .hud-card.hud-gold {
+    border-color: var(--gold-accent);
+    box-shadow:
+      inset 0 0 16px rgba(163,133,96,0.18),
+      0 0 12px rgba(163,133,96,0.20);
+  }
+
+  .hud-divider {
+    height: 1px;
+    background: linear-gradient(90deg,
+      transparent, var(--cyan-muted) 25%, var(--cyan-main) 50%,
+      var(--cyan-muted) 75%, transparent);
+    margin: 1.0rem 0;
+    opacity: 0.7;
+  }
+
+  .hud-pill {
+    display: inline-block;
+    padding: 0.18rem 0.6rem;
+    border: 1px solid var(--cyan-muted);
+    color: var(--cyan-soft);
+    background: rgba(122,247,255,0.05);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-right: 0.35rem;
+    margin-bottom: 0.25rem;
+    border-radius: 2px;
+  }
+  .hud-pill.danger {
+    border-color: var(--red-soft);
+    color: var(--red-soft);
+    background: rgba(192,68,74,0.08);
+  }
+  .hud-pill.gold {
+    border-color: var(--gold-accent);
+    color: var(--gold-accent);
+    background: rgba(163,133,96,0.10);
+  }
+
+  .hud-progress-track {
+    position: relative; height: 10px; width: 100%;
+    background: rgba(122,247,255,0.06);
+    border: 1px solid var(--cyan-muted);
+    border-radius: 2px; overflow: hidden;
+  }
+  .hud-progress-bar {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, var(--cyan-soft), var(--cyan-main));
+    box-shadow: 0 0 8px var(--cyan-main);
+  }
+  .hud-progress-bar.danger {
+    background: linear-gradient(90deg, var(--red-soft), var(--red-main));
+    box-shadow: 0 0 8px var(--red-main);
+  }
+  .hud-progress-bar.gold {
+    background: linear-gradient(90deg, var(--gold-accent), #d6b07f);
+    box-shadow: 0 0 8px var(--gold-accent);
+  }
+
+  /* ----- Streamlit native widget tweaks ----- */
+  [data-testid="stMetric"] {
+    background: rgba(16,32,39,0.55);
+    border: 1px solid var(--cyan-muted);
+    padding: 0.7rem 0.9rem;
+    border-radius: 2px;
+    clip-path: polygon(
+      10px 0, 100% 0, 100% calc(100% - 10px),
+      calc(100% - 10px) 100%, 0 100%, 0 10px);
+  }
+  [data-testid="stMetricLabel"] {
+    font-family: 'Share Tech Mono', monospace !important;
+    color: var(--cyan-soft) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 0.7rem !important;
+  }
+  [data-testid="stMetricValue"] {
+    color: var(--text-main) !important;
+    font-family: 'Rajdhani', sans-serif !important;
+    font-weight: 600;
+  }
+  [data-testid="stMetricDelta"] {
+    color: var(--gold-accent) !important;
+    font-family: 'Share Tech Mono', monospace !important;
+  }
+
+  div[data-baseweb="select"] > div, .stTextInput > div > div, .stNumberInput > div > div {
+    background: rgba(16,32,39,0.7) !important;
+    border: 1px solid var(--cyan-muted) !important;
+    color: var(--text-main) !important;
+  }
+
+  .stButton > button {
+    background: linear-gradient(135deg, rgba(45,143,149,0.25), rgba(122,247,255,0.15));
+    border: 1px solid var(--cyan-main);
+    color: var(--cyan-main);
+    font-family: 'Share Tech Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    padding: 0.5rem 1.2rem;
+    border-radius: 2px;
+    box-shadow: 0 0 12px rgba(122,247,255,0.15);
+  }
+  .stButton > button:hover {
+    background: linear-gradient(135deg, rgba(122,247,255,0.25), rgba(122,247,255,0.4));
+    color: var(--bg-deep);
+    box-shadow: 0 0 22px rgba(122,247,255,0.5);
+  }
+
+  /* Streamlit dataframe restyle */
+  [data-testid="stDataFrame"] {
+    background: rgba(16,32,39,0.5);
+    border: 1px solid var(--cyan-muted);
+    border-radius: 2px;
+  }
+
+  /* st.info / st.warning / st.error blocks */
+  [data-testid="stAlert"] {
+    background: rgba(16,32,39,0.6);
+    border-left: 3px solid var(--cyan-main);
+    color: var(--text-main);
+  }
+
+  /* ============================================================
+     TOP CHROME BAND (reference: cyberdeck v552)
+     ============================================================ */
+  .cyber-topband {
+    margin: -0.4rem 0 1.2rem 0;
+    padding: 0.7rem 1.0rem 0.5rem 1.0rem;
+    border: 1px solid var(--red-soft);
+    background:
+      linear-gradient(90deg, rgba(60,12,16,0.55), rgba(40,12,18,0.35) 50%, rgba(60,12,16,0.55));
+    box-shadow:
+      inset 0 0 18px rgba(192,68,74,0.10),
+      0 0 14px rgba(192,68,74,0.15);
+    clip-path: polygon(
+      0 0, 100% 0,
+      100% calc(100% - 12px), calc(100% - 12px) 100%,
+      0 100%);
+  }
+  .cyber-topband-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1.5rem; flex-wrap: wrap;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.78rem; letter-spacing: 0.18em;
+    color: var(--red-soft);
+    text-transform: uppercase;
+  }
+  .cyber-topband-row .left  { display:flex; gap:0.7rem; align-items:center; }
+  .cyber-topband-row .right { display:flex; gap:0.7rem; align-items:center; color: var(--cyan-soft); }
+  .cyber-topband-kanji {
+    font-family: 'Rajdhani', sans-serif; font-size: 1.4rem;
+    color: var(--red-soft); letter-spacing: 0.05em;
+  }
+
+  /* dotted bracket scale: [ . S . C . O . U . T . ] */
+  .cyber-bracket {
+    display: flex; align-items: center; gap: 0.4rem;
+    color: var(--red-soft); font-family: 'Share Tech Mono', monospace;
+    font-size: 0.85rem; letter-spacing: 0.15em;
+  }
+  .cyber-bracket .tick { color: var(--red-soft); opacity: 0.6; }
+  .cyber-bracket .letter { color: var(--cyan-soft); padding: 0 0.1rem; }
+
+  .cyber-barcode {
+    height: 14px; margin: 0.5rem 0 0.3rem 0;
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--cyan-main) 0 1px, transparent 1px 3px,
+      var(--cyan-main) 3px 5px, transparent 5px 9px,
+      var(--cyan-main) 9px 10px, transparent 10px 14px,
+      var(--cyan-main) 14px 17px, transparent 17px 22px);
+    opacity: 0.85;
+  }
+  .cyber-barcode.red {
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--red-soft) 0 1px, transparent 1px 3px,
+      var(--red-soft) 3px 5px, transparent 5px 9px,
+      var(--red-soft) 9px 10px, transparent 10px 14px,
+      var(--red-soft) 14px 17px, transparent 17px 22px);
+    opacity: 0.7;
+  }
+
+  .cyber-scanning {
+    display: flex; align-items: center; gap: 0.8rem;
+    font-family: 'Share Tech Mono', monospace; font-size: 0.78rem;
+    letter-spacing: 0.15em; color: var(--cyan-soft);
+    text-transform: uppercase;
+    margin-top: 0.3rem;
+  }
+  .cyber-scanning .label { flex: 0 0 auto; }
+  .cyber-scanning .track {
+    flex: 1; height: 8px; position: relative;
+    background: rgba(122,247,255,0.06);
+    border: 1px solid var(--cyan-muted);
+  }
+  .cyber-scanning .bar {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: linear-gradient(90deg, var(--cyan-soft), var(--cyan-main));
+    box-shadow: 0 0 6px var(--cyan-main);
+  }
+  .cyber-scanning .pct { flex: 0 0 auto; color: var(--cyan-main); }
+
+  /* ============================================================
+     SIDEBAR NAV BUTTON-CARDS (button-styled per reference image)
+     ============================================================ */
+  [data-testid="stSidebar"] .stButton > button {
+    /* every sidebar button takes the cyberdeck card look */
+    background: linear-gradient(135deg, rgba(45,143,149,0.18), rgba(122,247,255,0.06));
+    color: var(--cyan-main);
+    border: 1px solid var(--cyan-muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.85rem; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    text-align: left;
+    padding: 0.55rem 0.75rem 0.5rem 0.75rem;
+    border-radius: 1px;
+    box-shadow:
+      inset 0 0 12px rgba(122,247,255,0.06),
+      0 0 8px rgba(122,247,255,0.06);
+    clip-path: polygon(
+      8px 0, 100% 0,
+      100% calc(100% - 8px), calc(100% - 8px) 100%,
+      0 100%, 0 8px);
+    margin-top: 0.1rem;
+    white-space: pre-wrap;
+    line-height: 1.05;
+    min-height: 2.6rem;
+  }
+  [data-testid="stSidebar"] .stButton > button:hover {
+    background: linear-gradient(135deg, rgba(122,247,255,0.22), rgba(122,247,255,0.10));
+    border-color: var(--cyan-main);
+    color: var(--cyan-main);
+    box-shadow:
+      inset 0 0 16px rgba(122,247,255,0.18),
+      0 0 14px rgba(122,247,255,0.30);
+  }
+  /* Active (primary) nav button — red HACK-card look */
+  [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, rgba(192,68,74,0.55), rgba(122,38,48,0.50));
+    color: var(--text-main);
+    border-color: var(--red-soft);
+    box-shadow:
+      inset 0 0 16px rgba(224,90,95,0.30),
+      0 0 16px rgba(192,68,74,0.45);
+  }
+  [data-testid="stSidebar"] .stButton > button[kind="primary"]:hover {
+    background: linear-gradient(135deg, rgba(224,90,95,0.70), rgba(160,40,50,0.60));
+    color: var(--text-main);
+    border-color: var(--red-soft);
+  }
+
+  .cyber-nav-subtitle {
+    color: var(--text-muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.66rem; letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin: -0.05rem 0 0.55rem 0.6rem;
+    opacity: 0.78;
+  }
+  .cyber-nav-subtitle.active {
+    color: var(--red-soft);
+    opacity: 1.0;
+  }
+
+  /* ============================================================
+     FOOTER TERMINAL BAND
+     ============================================================ */
+  .cyber-footer {
+    margin-top: 2rem; padding: 0.8rem 1rem 0.6rem 1rem;
+    border-top: 1px solid var(--cyan-muted);
+    border-bottom: 1px solid var(--cyan-muted);
+    background: linear-gradient(180deg, rgba(16,32,39,0.5), rgba(10,18,22,0.3));
+  }
+  .cyber-footer .prompt {
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--cyan-main); font-size: 0.78rem;
+    letter-spacing: 0.12em;
+  }
+  .cyber-footer .prompt::after {
+    content: "▌"; color: var(--cyan-main); animation: blink 1.1s steps(2) infinite;
+    margin-left: 0.2rem;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .cyber-footer .disclaimer {
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--text-muted); font-size: 0.62rem;
+    letter-spacing: 0.15em; line-height: 1.5;
+    margin-top: 0.4rem; opacity: 0.7;
+    text-transform: uppercase;
+  }
+</style>
+"""
+
+st.markdown(CYBERDECK_CSS, unsafe_allow_html=True)
+
+
+# ============================================================================
+# Matchup module — load via importlib because the script name starts with a digit
+# ============================================================================
+@st.cache_resource
+def _load_matchup_module():
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    spec = importlib.util.spec_from_file_location(
+        "_matchup", str(SCRIPTS_DIR / "21_generate_matchup_report.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def get_matchup_module():
+    try:
+        return _load_matchup_module()
+    except Exception as e:  # noqa: BLE001
+        st.error(f"Matchup module failed to load: {e}")
+        return None
+
+
+# ============================================================================
+# Cached loaders — fail gracefully if files are missing
+# ============================================================================
+@st.cache_data
+def load_profiles() -> pd.DataFrame | None:
+    p = DATA_DIR / "player_profiles.csv"
+    if not p.exists():
+        return None
+    return pd.read_csv(p, dtype={"player_id": str})
+
+
+@st.cache_data
+def load_scores() -> pd.DataFrame | None:
+    p = DATA_DIR / "player_scouting_scores.csv"
+    if not p.exists():
+        return None
+    return pd.read_csv(p, dtype={"player_id": str})
+
+
+@st.cache_data
+def load_kfold_metrics() -> pd.DataFrame | None:
+    p = MODELS_DIR / "kfold_cv_metrics.csv"
+    return pd.read_csv(p) if p.exists() else None
+
+
+@st.cache_data
+def load_genai_metrics() -> pd.DataFrame | None:
+    p = MODELS_DIR / "genai_comparison_metrics.csv"
+    return pd.read_csv(p) if p.exists() else None
+
+
+@st.cache_data
+def load_feature_importances() -> pd.DataFrame | None:
+    p = MODELS_DIR / "kfold_cv_feature_importances.csv"
+    return pd.read_csv(p) if p.exists() else None
+
+
+@st.cache_data
+def load_per_fold() -> pd.DataFrame | None:
+    p = MODELS_DIR / "kfold_cv_per_fold.csv"
+    return pd.read_csv(p) if p.exists() else None
+
+
+# ============================================================================
+# HUD primitive helpers (HTML fragments)
+# ============================================================================
+def hud_header(eyebrow: str, title: str, subtitle: str = ""):
+    sub_html = f'<div style="color:var(--text-muted);font-size:1.0rem;margin-top:0.2rem;">{subtitle}</div>' if subtitle else ""
+    st.markdown(
+        f"""
+        <div style="margin:0.4rem 0 1.2rem 0;">
+          <div class="hud-meta">{eyebrow}</div>
+          <h1 style="margin:0;font-size:2.0rem;">{title}</h1>
+          {sub_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def hud_card(eyebrow: str, body_html: str, variant: str = ""):
+    cls = "hud-card"
+    if variant in ("warning", "success", "gold"):
+        cls += f" hud-{variant}"
+    st.markdown(
+        f"""<div class="{cls}">
+              <div class="hud-meta">{eyebrow}</div>
+              {body_html}
+            </div>""",
+        unsafe_allow_html=True,
+    )
+
+
+def hud_progress(label: str, value_pct: float, variant: str = ""):
+    """Render a labeled cyberdeck-style progress bar (0-100)."""
+    value_pct = max(0.0, min(100.0, float(value_pct)))
+    bar_cls = "hud-progress-bar"
+    if variant in ("danger", "gold"):
+        bar_cls += f" {variant}"
+    return f"""
+      <div style="margin:0.45rem 0;">
+        <div style="display:flex;justify-content:space-between;
+                    font-family:'Share Tech Mono',monospace;
+                    font-size:0.78rem;color:var(--cyan-soft);
+                    letter-spacing:0.1em;text-transform:uppercase;">
+          <span>{label}</span><span>{value_pct:.0f}%</span>
+        </div>
+        <div class="hud-progress-track">
+          <div class="{bar_cls}" style="width:{value_pct:.1f}%"></div>
+        </div>
+      </div>
+    """
+
+
+def pill(text: str, variant: str = "") -> str:
+    cls = "hud-pill"
+    if variant in ("danger", "gold"):
+        cls += f" {variant}"
+    return f'<span class="{cls}">{text}</span>'
+
+
+def divider():
+    st.markdown('<div class="hud-divider"></div>', unsafe_allow_html=True)
+
+
+def _fmt_pct(x):
+    if x is None or pd.isna(x):
+        return "—"
+    return f"{float(x)*100:.0f}%"
+
+
+def _fmt_num(x, signed=True):
+    if x is None or pd.isna(x):
+        return "—"
+    try:
+        v = float(x)
+        return f"{v:+.0f}" if signed else f"{v:.0f}"
+    except (TypeError, ValueError):
+        return str(x)
+
+
+def _fmt_int(x):
+    if x is None or pd.isna(x):
+        return "—"
+    return str(int(x))
+
+
+# Plotly theming
+PLOTLY_LAYOUT = dict(
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(16,32,39,0.5)",
+    font=dict(family="Share Tech Mono", color="#D8FFFF"),
+    margin=dict(l=20, r=10, t=40, b=20),
+    xaxis=dict(gridcolor="rgba(122,247,255,0.10)", linecolor="#2D8F95",
+               tickcolor="#2D8F95", title_font=dict(size=12)),
+    yaxis=dict(gridcolor="rgba(122,247,255,0.10)", linecolor="#2D8F95",
+               tickcolor="#2D8F95", title_font=dict(size=12)),
+    title_font=dict(family="Rajdhani", color="#7AF7FF", size=16),
+)
+
+
+# ============================================================================
+# Top header band (reference: cyberdeck v552 admin chrome)
+# ============================================================================
+def render_top_band():
+    """Reference-image style chrome: bracket scale + version code + barcode + scanning bar."""
+    # The dotted bracket scale: [ . S . C . O . U . T . ]
+    letters = list("SCOUT")
+    bracket_inner = "".join(
+        f'<span class="tick">·</span><span class="letter">{ch}</span>'
+        for ch in letters
+    ) + '<span class="tick">·</span>'
+    bracket = f'<span>[</span>{bracket_inner}<span>]</span>'
+
+    # Scanning bar — based on number of scouted players in the dataset
+    profiles = load_profiles()
+    total = 191
+    scanned = len(profiles) if profiles is not None else 0
+    pct = (scanned / total * 100) if total else 0
+
+    st.markdown(
+        f"""
+        <div class="cyber-topband">
+          <div class="cyber-topband-row">
+            <div class="left">
+              <span class="cyber-topband-kanji">♟</span>
+              <span>CYBERDECK&nbsp;V&nbsp;0.55.2&nbsp;//&nbsp;USCF&nbsp;NODE&nbsp;0xC4</span>
+            </div>
+            <div class="cyber-bracket">{bracket}</div>
+            <div class="right">
+              <span>BUILD 18 · REV 22</span>
+              <span style="color:var(--red-soft);">// ADMIN ACCESS GRANTED</span>
+            </div>
+          </div>
+          <div class="cyber-barcode"></div>
+          <div class="cyber-scanning">
+            <span class="label">SCANNING&nbsp;PLAYER&nbsp;PROFILES</span>
+            <div class="track"><div class="bar" style="width:{pct:.0f}%"></div></div>
+            <span class="pct">{pct:.0f}%&nbsp;&nbsp;·&nbsp;&nbsp;{scanned} / {total} PROFILES</span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_footer():
+    st.markdown(
+        """
+        <div class="cyber-footer">
+          <div class="cyber-barcode" style="margin-top:0;"></div>
+          <div class="prompt" style="margin-top:0.5rem;">ROOT@USCF-CYBERDECK : ~ #&nbsp;</div>
+          <div class="disclaimer">
+            CACHED DATA NODE · NO LIVE USCF SCRAPING · NO API KEYS ·
+            FOR EDUCATIONAL &amp; PORTFOLIO USE ·
+            CROSSTABLE ORDER IS NOT OFFICIAL TIEBREAK ORDER ·
+            RATING-TREND FIGURES MARKED "PROXY" ARE RECONSTRUCTED FROM PRE-RATING CHRONOLOGY
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================================
+# Sidebar navigation — button-card nav (active = red HACK-card style)
+# ============================================================================
+NAV_ITEMS: list[tuple[str, str, str]] = [
+    ("01 // COMMAND CENTER",       "▣",  "MISSION BRIEF · DATASET METRICS"),
+    ("02 // MODEL INTEL",          "▼",  "MODEL VS ELO · K-FOLD CV"),
+    ("03 // FEATURE VECTORS",      "▦",  "INPUT SIGNALS · IMPORTANCE"),
+    ("04 // PLAYER DOSSIER",       "◉",  "OPPONENT PROFILE INTEL"),
+    ("05 // UNDERRATED PROTOCOL",  "▲",  "0–100 THREAT SCORE · 6 SUBSCORES"),
+    ("06 // MATCHUP SIM",          "✸",  "PREDICT P(WIN) · SIDE-BY-SIDE"),
+    ("07 // DATA REPAIR LOG",      "⚠",  "PARSER PATCH · BEFORE / AFTER"),
+]
+
+if "active_page" not in st.session_state:
+    st.session_state.active_page = NAV_ITEMS[0][0]
+
+with st.sidebar:
+    st.markdown(
+        """
+        <div style="text-align:center; margin-bottom:0.6rem;">
+          <div class="hud-meta" style="text-align:center;">USCF // NODE 0xC4</div>
+          <h2 style="margin:0; font-size:1.45rem; line-height:1.0;">CYBERDECK<br/>SCOUT</h2>
+          <div style="color:var(--text-muted);font-size:0.75rem;letter-spacing:0.15em;
+                      font-family:'Share Tech Mono',monospace;">
+            v1.0  ·  ACCESS GRANTED
+          </div>
+        </div>
+        <div class="cyber-barcode" style="margin:0.4rem 0 0.8rem 0;"></div>
+        <div class="hud-meta">ACCESS NODES</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for page_key, icon, subtitle in NAV_ITEMS:
+        is_active = (st.session_state.active_page == page_key)
+        label = f"{icon}   {page_key}"
+        if st.button(label, key=f"nav_{page_key}",
+                     type=("primary" if is_active else "secondary"),
+                     width="stretch"):
+            st.session_state.active_page = page_key
+            st.rerun()
+        st.markdown(
+            f'<div class="cyber-nav-subtitle{" active" if is_active else ""}">{subtitle}</div>',
+            unsafe_allow_html=True,
+        )
+
+    page = st.session_state.active_page
+
+    st.markdown(
+        """
+        <div class="hud-divider"></div>
+        <div class="hud-meta">SYSTEM STATUS</div>
+        <div style="font-family:'Share Tech Mono',monospace;
+                    font-size:0.72rem;color:var(--text-muted);
+                    line-height:1.7;">
+          MODEL_NODE ........ <span style="color:#5ED7D9;">ONLINE</span><br/>
+          DATA_NODE ......... <span style="color:#5ED7D9;">ONLINE</span><br/>
+          SCOUT_NODE ........ <span style="color:#5ED7D9;">ONLINE</span><br/>
+          GEO_NODE .......... <span style="color:#5ED7D9;">ONLINE</span><br/>
+          USCF_SCRAPER ...... <span style="color:#FF7777;">OFFLINE</span><br/>
+          CACHE_AGE ......... <span style="color:#A38560;">7d</span>
+        </div>
+        <div class="cyber-barcode red" style="margin-top:0.6rem;"></div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# ============================================================================
+# PAGE 1 — Command Center
+# ============================================================================
+def page_command_center():
+    hud_header(
+        "ACCESS GRANTED  ·  NODE 0xC4",
+        "USCF Cyberdeck Scout",
+        "Opponent scouting + game-outcome prediction from public USCF history data.",
+    )
+
+    # Headline metric strip
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("RAW GAMES SCRAPED", "13,305")
+    c2.metric("CLEAN MODELED GAMES", "8,514")
+    c3.metric("FOCAL PLAYERS", "179")
+    c4.metric("TOURNAMENT EVENTS", "3,020")
+
+    divider()
+
+    cL, cR = st.columns([1.1, 1])
+    with cL:
+        hud_card(
+            "MISSION BRIEF",
+            """
+            <p>USCF Cyberdeck Scout transforms public USCF tournament data into
+            <strong style="color:var(--cyan-main)">game-outcome predictions</strong>
+            and <strong style="color:var(--cyan-main)">opponent scouting reports</strong>.</p>
+            <p>The goal is not just to ask <em>"who is favored?"</em> &mdash;
+            Elo already answers that. The goal is to explain
+            <strong style="color:var(--gold-accent)">what kind of opponent you are facing</strong>:
+            are they hot, rusty, dangerous against stronger players, on the rise?</p>
+            """,
+        )
+        hud_card(
+            "TWO-LAYER ARCHITECTURE",
+            """
+            <p><strong style="color:var(--cyan-main)">ML LAYER.</strong>
+            Supervised classifier (Gradient Boosting) tuned with
+            <code style="color:var(--cyan-soft)">TimeSeriesSplit(5)</code> +
+            <code style="color:var(--cyan-soft)">GridSearchCV</code> on a 70%
+            chronological training pool, judged on a held-out 15% test slice
+            the model never saw.</p>
+            <p><strong style="color:var(--cyan-main)">SCOUTING LAYER.</strong>
+            Interpretable, rule-based 0–100 <em>"Underrated Potential"</em>
+            score derived from each player's activity, recent form, upset
+            history, schedule strength, momentum, and volatility.</p>
+            """,
+            variant="success",
+        )
+
+    with cR:
+        hud_card(
+            "DATA SOURCE",
+            """
+            <p style="font-family:'Share Tech Mono',monospace;line-height:1.7;font-size:0.85rem;">
+            SOURCE ........ public USCF MSA<br/>
+            NOT KAGGLE .... ✔<br/>
+            COLLECTION .... custom scraper + cache<br/>
+            DELAY ......... 2.0 sec / request<br/>
+            CACHE PAGES ... 4,292<br/>
+            DATE RANGE .... 2001-03 → 2025-10<br/>
+            SCRAPER ....... <span style="color:#FF7777;">DISABLED IN APP</span>
+            </p>
+            """,
+        )
+        hud_card(
+            "DATA QUALITY ALERT",
+            """
+            <p style="line-height:1.5;">
+            A parser bug was caught during EDA: <code>rating_diff</code>
+            correlated <em>negatively</em> with winning (impossible for chess).
+            Root cause traced to a regex that was capturing the first
+            4 digits of the 8-digit USCF ID instead of the rating after
+            <code>R:</code>.
+            </p>
+            <p style="line-height:1.5;">After re-parsing the local HTML cache
+            (no re-scrape), correlation flipped to <strong style="color:var(--cyan-main)">+0.49</strong>,
+            and test AUC jumped from <strong style="color:var(--red-soft)">0.67</strong>
+            to <strong style="color:var(--cyan-main)">0.82</strong>. See
+            <em>07 // DATA REPAIR LOG</em>.</p>
+            """,
+            variant="warning",
+        )
+
+
+# ============================================================================
+# PAGE 2 — Model Intel
+# ============================================================================
+def page_model_intel():
+    hud_header(
+        "MODEL INTEL  ·  PHASE 12 TUNING",
+        "Outcome Prediction Performance",
+        "Held-out 1,278-game chronological test set. Per-fold AUC std ≤ 0.015.",
+    )
+
+    metrics = load_kfold_metrics()
+    genai = load_genai_metrics()
+    if metrics is None:
+        st.error("kfold_cv_metrics.csv is missing — run `scripts/16_kfold_cv_tuning.py`.")
+        return
+
+    test_rows = metrics[metrics["split"] == "Test"].copy()
+    headline = test_rows[["model", "cv_mean_roc_auc", "roc_auc", "f1", "accuracy", "precision", "recall"]] \
+        .rename(columns={"roc_auc": "test_auc", "cv_mean_roc_auc": "cv_auc"})
+
+    if genai is not None:
+        elo = genai[genai["approach"].str.startswith("Elo")].iloc[0]
+        elo_row = pd.DataFrame([{
+            "model": "Elo zero-shot baseline",
+            "cv_auc": np.nan, "test_auc": elo["roc_auc"],
+            "f1": elo["f1"], "accuracy": elo["accuracy"],
+            "precision": elo["precision"], "recall": elo["recall"],
+        }])
+        full = pd.concat([headline, elo_row], ignore_index=True)
+    else:
+        full = headline
+
+    st.markdown('<div class="hud-meta">>> COMPARISON TABLE</div>', unsafe_allow_html=True)
+    fmt = {c: "{:.4f}" for c in ["cv_auc", "test_auc", "f1", "accuracy", "precision", "recall"]}
+    st.dataframe(
+        full.style
+            .format(fmt, na_rep="—")
+            .background_gradient(subset=["test_auc"], cmap="Greens"),
+        width="stretch", hide_index=True,
+    )
+
+    cL, cR = st.columns(2)
+    with cL:
+        fig = px.bar(
+            full.sort_values("test_auc"),
+            x="test_auc", y="model", orientation="h",
+            range_x=[0.5, 0.9],
+            color="test_auc", color_continuous_scale=[(0, "#2D8F95"), (1, "#7AF7FF")],
+            title="TEST ROC-AUC BY MODEL",
+        )
+        fig.update_layout(**PLOTLY_LAYOUT, showlegend=False, height=380,
+                          coloraxis_showscale=False)
+        st.plotly_chart(fig, width="stretch")
+
+    with cR:
+        folds = load_per_fold()
+        if folds is not None:
+            fig2 = px.box(folds, x="model", y="val_roc_auc",
+                          title="PER-FOLD VALIDATION AUC (5-FOLD TIME-SERIES CV)",
+                          points="all", color_discrete_sequence=["#7AF7FF"])
+            fig2.update_layout(**PLOTLY_LAYOUT, height=380, yaxis_title="ROC-AUC")
+            st.plotly_chart(fig2, width="stretch")
+
+    divider()
+
+    hud_card(
+        "HONEST FRAMING  ·  DO NOT OVERCLAIM",
+        """
+        <p>All three ML models (Logistic, Random Forest, Gradient Boosting)
+        land within <strong>~0.002 AUC</strong> of the closed-form Elo formula
+        on the test set. That is the <em>correct</em> finding: a 70-year-old
+        domain baseline is extremely strong, and our pipeline is honest enough
+        to match it without faking an improvement.</p>
+        <p style="color:var(--gold-accent)">
+        <strong>Product value lives one layer above prediction</strong>
+        &mdash; in the scouting intelligence that explains <em>why</em> a
+        matchup is interesting, not just <em>who</em> is favored.</p>
+        """,
+        variant="gold",
+    )
+
+
+# ============================================================================
+# PAGE 3 — Feature Vectors
+# ============================================================================
+def page_feature_vectors():
+    hud_header(
+        "FEATURE VECTORS  ·  INPUT INTEL",
+        "What the model actually sees",
+        "Each feature explained in plain English with its scouting interpretation.",
+    )
+
+    feature_docs = [
+        ("player_pre_rating",     "Rating",     "Focal player's USCF rating coming into the game.",                        "Strongest single signal of skill — but static; doesn't know if you're sharp or rusty."),
+        ("opponent_pre_rating",   "Rating",     "Opponent's USCF rating coming into the game.",                            "Half of the matchup; tree models also learn it directly, not just via the difference."),
+        ("rating_diff",           "Rating",     "player_pre_rating − opponent_pre_rating.",                                "Single strongest predictor — ~55% of tree importance on its own."),
+        ("time_control",          "Format",     "Regular / Quick / Blitz / Unknown.",                                      "Skill is partially time-control-specific; blitz specialists ≠ classical grinders."),
+        ("player_games_last_30d", "Activity",   "Volume of games in last 30 days.",                                        "Short-term form / rust indicator."),
+        ("player_games_last_90d", "Activity",   "Volume over 90 days.",                                                    "Best balanced activity window; most predictive of the three."),
+        ("player_games_last_365d","Activity",   "Annual game volume.",                                                     "Separates committed tournament players from casual entrants."),
+        ("player_recent_avg_opponent_rating_90d", "Recent Form", "Average opponent strength faced in last 90 days.",        "Are recent results against tough or soft fields?"),
+        ("player_recent_win_rate_90d", "Recent Form", "90-day win rate.",                                                  "Direct momentum signal — hot, cold, or stable?"),
+        ("missing_recent_avg_opp_90d", "Cold-Start", "Flag for players with no recent opponents at all.",                  "Tells the model to discount recency features rather than impute silently."),
+        ("missing_recent_win_rate_90d","Cold-Start", "Flag for players with no recent results to summarize.",              "Same idea — explicit missingness > silent fill."),
+    ]
+
+    family_colors = {"Rating": "", "Format": "", "Activity": "",
+                     "Recent Form": "", "Cold-Start": "danger"}
+
+    fams = sorted({f[1] for f in feature_docs})
+    selected = st.multiselect("FILTER BY SIGNAL CATEGORY", fams, default=fams)
+
+    # Grid of HUD cards
+    cards_per_row = 2
+    filtered = [f for f in feature_docs if f[1] in selected]
+    for i in range(0, len(filtered), cards_per_row):
+        cols = st.columns(cards_per_row)
+        for j, feat in enumerate(filtered[i:i + cards_per_row]):
+            name, fam, plain, why = feat
+            with cols[j]:
+                hud_card(
+                    f"[ {fam.upper()} SIGNAL ]",
+                    f"""
+                    <div style="font-family:'Share Tech Mono',monospace;
+                                color:var(--cyan-main);font-size:1.05rem;
+                                margin-bottom:0.4rem;">{name}</div>
+                    <div style="color:var(--text-muted);font-size:0.82rem;
+                                margin-bottom:0.4rem;">PLAIN MEANING</div>
+                    <p style="margin:0 0 0.6rem 0;">{plain}</p>
+                    <div style="color:var(--text-muted);font-size:0.82rem;
+                                margin-bottom:0.4rem;">WHY IT MATTERS</div>
+                    <p style="margin:0;">{why}</p>
+                    """,
+                    variant=family_colors.get(fam, ""),
+                )
+
+    divider()
+
+    fi = load_feature_importances()
+    if fi is not None:
+        st.markdown('<div class="hud-meta">>> FEATURE IMPORTANCE (RANDOM FOREST)</div>',
+                    unsafe_allow_html=True)
+        rf_imp = fi[fi["model"] == "RandomForest"].sort_values("importance", ascending=True).tail(15)
+        fig = px.bar(
+            rf_imp, x="importance", y="feature", orientation="h",
+            color="importance",
+            color_continuous_scale=[(0, "#2D8F95"), (1, "#7AF7FF")],
+        )
+        fig.update_layout(**PLOTLY_LAYOUT, height=480,
+                          showlegend=False, coloraxis_showscale=False)
+        st.plotly_chart(fig, width="stretch")
+        st.markdown(
+            '<div style="color:var(--text-muted);font-size:0.85rem;">'
+            'Recency / activity features collectively carry ~13% of tree importance — '
+            'secondary but consistent. Story: <em>rating dominates, momentum fine-tunes</em>.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+
+# ============================================================================
+# PAGE 4 — Player Dossier
+# ============================================================================
+def _player_picker(profiles: pd.DataFrame, key: str, default_idx: int = 0) -> str:
+    rated = profiles.dropna(subset=["current_rating"]).copy()
+    rated["display"] = rated.apply(
+        lambda r: f"{r['player_id']}  ·  RTG {int(r['current_rating'])}  ·  "
+                  f"{int(r['career_n_games']) if pd.notna(r['career_n_games']) else 0} games",
+        axis=1,
+    )
+    options = rated.sort_values("current_rating", ascending=False)["display"].tolist()
+    pick = st.selectbox("TARGET PLAYER ID", options, index=min(default_idx, len(options) - 1),
+                        key=key)
+    return pick.split("  ·  ")[0]
+
+
+def page_player_dossier():
+    hud_header(
+        "PLAYER DOSSIER  ·  CLASSIFIED",
+        "Opponent Profile Intel",
+        "Per-player aggregate of activity, form, upset, momentum, time-control, and event-success vectors.",
+    )
+
+    profiles = load_profiles()
+    scores = load_scores()
+    if profiles is None or scores is None:
+        st.error("Player profile/scoring CSVs missing — run scripts 19 & 20.")
+        return
+
+    pid = _player_picker(profiles, key="dossier_pick")
+    row = profiles[profiles["player_id"] == pid].iloc[0]
+    sc_match = scores[scores["player_id"] == pid]
+    s = sc_match.iloc[0] if not sc_match.empty else None
+
+    # Top metric strip
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("CURRENT RATING", _fmt_int(row.get("current_rating")))
+    m2.metric("CAREER GAMES", _fmt_int(row.get("career_n_games")))
+    m3.metric("GAMES LAST 90D", _fmt_int(row.get("games_last_90d")))
+    if s is not None and pd.notna(s.get("underrated_score")):
+        m4.metric("UNDERRATED POTENTIAL", f"{s['underrated_score']:.0f}/100",
+                  s.get("bucket_label"))
+    else:
+        m4.metric("UNDERRATED POTENTIAL", "INSUFF DATA")
+
+    if row.get("small_sample_warning") or (s is not None and s.get("bucket_label") == "Insufficient data"):
+        st.markdown(
+            f'<div class="hud-card hud-warning"><div class="hud-meta">⚠ SAMPLE-SIZE WARNING</div>'
+            f'<p>Limited recent or career data. Treat all scouting numbers as <em>preliminary</em>.</p></div>',
+            unsafe_allow_html=True,
+        )
+
+    divider()
+
+    # ----- Activity / Recent Form -----
+    cA, cB = st.columns(2)
+    with cA:
+        bars = []
+        bars.append(hud_progress("ACTIVITY · GAMES 90d", min(100, (row.get("games_last_90d", 0) or 0) * 100 / 15)))
+        wr90 = row.get("recent_win_rate_90d")
+        bars.append(hud_progress("RECENT WIN RATE 90d",
+                                 float(wr90) * 100 if pd.notna(wr90) else 0,
+                                 "danger" if (pd.notna(wr90) and wr90 < 0.4) else ""))
+        sr90 = row.get("recent_score_rate_90d")
+        bars.append(hud_progress("RECENT SCORE RATE 90d (W=1, D=0.5)",
+                                 float(sr90) * 100 if pd.notna(sr90) else 0))
+        cons = row.get("consistency_score")
+        if pd.notna(cons):
+            bars.append(hud_progress("CONSISTENCY INDEX", float(cons) * 100, "gold"))
+        hud_card("ACTIVITY · FORM · CONSISTENCY", "\n".join(bars))
+
+    with cB:
+        # Upset / strength of schedule
+        bars = []
+        sr_hi = row.get("score_rate_vs_higher_rated")
+        bars.append(hud_progress("SCORE RATE vs +100 OPPONENTS",
+                                 float(sr_hi) * 100 if pd.notna(sr_hi) else 0,
+                                 "gold" if (pd.notna(sr_hi) and sr_hi >= 0.5) else ""))
+        pct_higher = row.get("pct_games_vs_higher_rated_90d")
+        bars.append(hud_progress("PCT GAMES vs HIGHER-RATED 90d",
+                                 float(pct_higher) * 100 if pd.notna(pct_higher) else 0))
+        upset = row.get("upset_rate_365d")
+        bars.append(hud_progress("UPSET WIN RATE 365d (+100)",
+                                 float(upset) * 100 if pd.notna(upset) else 0,
+                                 "gold" if (pd.notna(upset) and upset >= 0.2) else ""))
+        hud_card("UPSET · SCHEDULE STRENGTH", "\n".join(bars))
+
+    # ----- Rating trend chart -----
+    cT, cR = st.columns([1.3, 1])
+    with cT:
+        ratings_seq = []
+        for label, d in [("365d", "rating_change_365d_proxy"),
+                         ("180d", "rating_change_180d_proxy"),
+                         ("90d", "rating_change_90d_proxy"),
+                         ("30d", "rating_change_30d_proxy")]:
+            v = row.get(d)
+            ratings_seq.append({"window": label,
+                                "delta": float(v) if pd.notna(v) else 0.0})
+        df_trend = pd.DataFrame(ratings_seq)
+        fig = px.bar(
+            df_trend, x="window", y="delta",
+            title="RATING DELTA (PROXY · PRE-RATING CHRONOLOGY)",
+            color="delta", color_continuous_scale=[(0, "#C0444A"), (0.5, "#2D8F95"), (1, "#7AF7FF")],
+        )
+        fig.update_layout(**PLOTLY_LAYOUT, height=320, coloraxis_showscale=False,
+                          yaxis_title="Δ rating (points)")
+        st.plotly_chart(fig, width="stretch")
+        st.markdown(
+            '<div style="color:var(--text-muted);font-size:0.8rem;">'
+            'TODO: <code>player_post_rating</code> not currently parsed; deltas are reconstructed '
+            'from chronological pre-rating values.</div>',
+            unsafe_allow_html=True,
+        )
+
+    with cR:
+        # Time-control profile
+        pcts = {
+            "Regular": float(row.get("pct_regular_games") or 0) * 100,
+            "Quick":   float(row.get("pct_quick_games") or 0) * 100,
+            "Blitz":   float(row.get("pct_blitz_games") or 0) * 100,
+        }
+        df_tc = pd.DataFrame({"tc": list(pcts.keys()), "pct": list(pcts.values())})
+        fig = px.bar(df_tc, x="tc", y="pct", title="TIME-CONTROL IDENTITY",
+                     color="pct", color_continuous_scale=[(0, "#2D8F95"), (1, "#7AF7FF")])
+        fig.update_layout(**PLOTLY_LAYOUT, height=320, coloraxis_showscale=False,
+                          yaxis_title="% of games", yaxis_range=[0, 100])
+        st.plotly_chart(fig, width="stretch")
+        st.markdown(
+            f'<div class="hud-pill">SPECIALIST · {row.get("time_control_specialist_label") or "—"}</div>'
+            f'<div class="hud-pill gold">BEST TC · {row.get("best_time_control_by_score_rate") or "—"}</div>',
+            unsafe_allow_html=True,
+        )
+
+    divider()
+
+    # ----- Event Success + Home Region -----
+    cE, cH = st.columns([1.5, 1])
+    with cE:
+        hud_card(
+            "EVENT SUCCESS  ·  LAST 365D  (CROSSTABLE-DERIVED)",
+            f"""
+            <table style="width:100%;border-collapse:collapse;font-family:'Share Tech Mono',monospace;font-size:0.85rem;">
+              <tr><td style="color:var(--text-muted);">TOP CROSSTABLE SCORE 90d ...</td><td style="text-align:right;color:var(--cyan-main);">{_fmt_int(row.get('events_won_last_90d'))}</td></tr>
+              <tr><td style="color:var(--text-muted);">TOP CROSSTABLE SCORE 365d ..</td><td style="text-align:right;color:var(--cyan-main);">{_fmt_int(row.get('events_won_last_365d'))}</td></tr>
+              <tr><td style="color:var(--text-muted);">APPROX TOP-3 FINISHES 365d .</td><td style="text-align:right;color:var(--cyan-main);">{_fmt_int(row.get('top_3_finishes_last_365d'))}</td></tr>
+              <tr><td style="color:var(--text-muted);">APPROX TOP-5 FINISHES 365d .</td><td style="text-align:right;color:var(--cyan-main);">{_fmt_int(row.get('top_5_finishes_last_365d'))}</td></tr>
+              <tr><td style="color:var(--text-muted);">BEST FINISH PCTILE 365d ....</td><td style="text-align:right;color:var(--gold-accent);">{_fmt_pct(row.get('best_recent_finish_percentile'))}</td></tr>
+              <tr><td style="color:var(--text-muted);">AVG FINISH PCTILE 365d .....</td><td style="text-align:right;color:var(--cyan-soft);">{_fmt_pct(row.get('avg_finish_percentile_365d'))}</td></tr>
+              <tr><td style="color:var(--text-muted);">AVG FIELD STRENGTH 365d ....</td><td style="text-align:right;color:var(--cyan-soft);">{_fmt_num(row.get('avg_field_strength_last_365d'), signed=False)}</td></tr>
+            </table>
+            <div style="color:var(--text-muted);font-size:0.78rem;margin-top:0.6rem;line-height:1.5;">
+              USCF crosstables are sorted by score group then post-event rating, <em>not</em>
+              by tiebreak/prize order &mdash; so these are <strong>approximate</strong> finishes
+              (e.g. "top score group") rather than official podium placements.
+            </div>
+            """,
+        )
+    with cH:
+        avg_mi = row.get("avg_travel_distance_miles")
+        max_mi = row.get("max_travel_distance_miles")
+        out_pct = row.get("pct_events_outside_home_region")
+        unique_locs = row.get("unique_event_locations")
+        unique_states = row.get("unique_event_states") or row.get("unique_states_played")
+        travel_label = row.get("traveling_competitor_label") or "—"
+        travel_conf = row.get("travel_distance_confidence") or "—"
+        travel_pill = pill(f"PROFILE · {travel_label}",
+                           "gold" if "ROAD WARRIOR" in travel_label.upper() else "")
+        hud_card(
+            "TRAVEL · GEOGRAPHY",
+            f"""
+            <p style="font-family:'Share Tech Mono',monospace;font-size:0.85rem;line-height:1.7;">
+            HOME REGION ........ <span style="color:var(--cyan-main);">{row.get('inferred_home_region') or '—'}</span><br/>
+            STATES PLAYED ...... <span style="color:var(--cyan-main);">{_fmt_int(unique_states)}</span><br/>
+            UNIQUE LOCATIONS ... <span style="color:var(--cyan-main);">{_fmt_int(unique_locs)}</span><br/>
+            AVG TRAVEL MI ...... <span style="color:var(--gold-accent);">{f"{avg_mi:.0f}" if pd.notna(avg_mi) else "—"}</span><br/>
+            MAX TRAVEL MI ...... <span style="color:var(--gold-accent);">{f"{max_mi:.0f}" if pd.notna(max_mi) else "—"}</span><br/>
+            OUTSIDE HOME ....... <span style="color:var(--cyan-soft);">{_fmt_pct(out_pct)}</span><br/>
+            </p>
+            <div style="margin-top:0.4rem;">{travel_pill}</div>
+            <div style="color:var(--text-muted);font-size:0.78rem;margin-top:0.5rem;">
+              {travel_conf}. USCF MSA exposes city + state + zip on the event header;
+              GPS-level coordinates are not provided, so distances are approximate.
+            </div>
+            """,
+        )
+
+
+# ============================================================================
+# PAGE 5 — Underrated Protocol
+# ============================================================================
+def _gauge(value: float, max_value: float = 100.0, title: str = "UNDERRATED POTENTIAL"):
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=value,
+        number={"font": {"family": "Rajdhani", "color": "#D8FFFF", "size": 44}},
+        gauge={
+            "axis": {"range": [0, max_value], "tickcolor": "#2D8F95",
+                     "tickfont": {"family": "Share Tech Mono", "color": "#7FAFB4"}},
+            "bar": {"color": "#7AF7FF"},
+            "bgcolor": "rgba(16,32,39,0.4)",
+            "borderwidth": 1, "bordercolor": "#2D8F95",
+            "steps": [
+                {"range": [0, 30],  "color": "rgba(45,143,149,0.18)"},
+                {"range": [30, 55], "color": "rgba(122,247,255,0.12)"},
+                {"range": [55, 70], "color": "rgba(163,133,96,0.20)"},
+                {"range": [70, 85], "color": "rgba(192,68,74,0.25)"},
+                {"range": [85, 100], "color": "rgba(192,68,74,0.45)"},
+            ],
+        },
+        title={"text": title,
+               "font": {"family": "Share Tech Mono", "color": "#7AF7FF", "size": 14}},
+    ))
+    layout = {**PLOTLY_LAYOUT, "margin": dict(t=60, b=20, l=20, r=20)}
+    fig.update_layout(**layout, height=320)
+    return fig
+
+
+def page_underrated_protocol():
+    hud_header(
+        "UNDERRATED PROTOCOL  ·  THREAT SCORING",
+        "Rule-based 0–100 Underrated Potential",
+        'Six interpretable subscores with sample-size guardrails. We never claim "smurf" — we say "may be playing above rating."',
+    )
+
+    profiles = load_profiles()
+    scores = load_scores()
+    if profiles is None or scores is None:
+        st.error("Run scripts 19 & 20 first.")
+        return
+
+    pick = _player_picker(profiles, key="protocol_pick", default_idx=10)
+    row = profiles[profiles["player_id"] == pick].iloc[0]
+    sc = scores[scores["player_id"] == pick].iloc[0] if not scores[scores["player_id"] == pick].empty else None
+
+    cG, cI = st.columns([1, 1.2])
+    with cG:
+        gauge_val = float(sc["underrated_score"]) if (sc is not None and pd.notna(sc.get("underrated_score"))) else 0
+        st.plotly_chart(_gauge(gauge_val), width="stretch")
+        if sc is not None:
+            badge_var = "gold" if gauge_val >= 70 else "danger" if sc.get("bucket_label") == "Insufficient data" else ""
+            st.markdown(
+                f'<div style="text-align:center;">{pill(sc.get("bucket_label","—"), badge_var)}</div>',
+                unsafe_allow_html=True,
+            )
+
+    with cI:
+        if sc is None or sc.get("bucket_label") == "Insufficient data":
+            hud_card(
+                "INSUFFICIENT DATA",
+                f"""
+                <p>This player has <strong>{_fmt_int(row.get('career_n_games'))}</strong>
+                career games and <strong>{_fmt_int(row.get('games_last_90d'))}</strong>
+                in the last 90 days. The underrated-potential score requires a minimum
+                sample before we trust it.</p>
+                <p style="color:var(--text-muted);">Pick a player with denser
+                tournament history to see a meaningful gauge breakdown.</p>
+                """,
+                variant="warning",
+            )
+        else:
+            bars = []
+            bars.append(hud_progress(f"UPSET ({sc['upset_score']:.1f}/25)",        sc["upset_score"] * 100 / 25,        "gold" if sc["upset_score"] >= 12 else ""))
+            bars.append(hud_progress(f"RECENT FORM ({sc['form_score']:.1f}/20)",   sc["form_score"] * 100 / 20))
+            bars.append(hud_progress(f"MOMENTUM ({sc['momentum_score']:.1f}/20)",  sc["momentum_score"] * 100 / 20))
+            bars.append(hud_progress(f"SCHEDULE ({sc['schedule_score']:.1f}/15)",  sc["schedule_score"] * 100 / 15))
+            bars.append(hud_progress(f"ACTIVITY ({sc['activity_score']:.1f}/10)",  sc["activity_score"] * 100 / 10))
+            bars.append(hud_progress(f"VOLATILITY ({sc['volatility_score']:.1f}/10)", sc["volatility_score"] * 100 / 10))
+            hud_card(f"COMPONENT BREAKDOWN  ·  ×{sc['sample_size_multiplier']:.2f} SAMPLE-SIZE MULTIPLIER",
+                     "\n".join(bars))
+
+    if sc is not None and sc.get("highlight_signals"):
+        divider()
+        sig_html = "".join(f"<li>{s.strip()}</li>" for s in sc["highlight_signals"].split("•") if s.strip())
+        hud_card(
+            "WHY THIS PLAYER MIGHT BE DANGEROUS",
+            f'<ul style="margin:0;padding-left:1.2rem;line-height:1.8;">{sig_html}</ul>',
+            variant="gold",
+        )
+
+    divider()
+    # Distribution of all players
+    hud_card(
+        "POPULATION DISTRIBUTION",
+        '<div style="color:var(--text-muted);font-size:0.85rem;margin-bottom:0.4rem;">'
+        'Where this player sits relative to every scouted player in our dataset.</div>'
+    )
+    scored = scores.dropna(subset=["underrated_score"]).copy()
+    fig = px.histogram(
+        scored, x="underrated_score", nbins=20,
+        title="UNDERRATED POTENTIAL · POPULATION HISTOGRAM",
+        color_discrete_sequence=["#7AF7FF"],
+    )
+    if sc is not None and pd.notna(sc.get("underrated_score")):
+        fig.add_vline(x=float(sc["underrated_score"]), line_color="#E05A5F",
+                      line_width=2, annotation_text=f"  {pick}",
+                      annotation_font_color="#E05A5F")
+    fig.update_layout(**PLOTLY_LAYOUT, height=320, bargap=0.08,
+                      yaxis_title="Players", xaxis_title="Score")
+    st.plotly_chart(fig, width="stretch")
+
+
+# ============================================================================
+# PAGE 6 — Matchup Sim
+# ============================================================================
+def _opponent_card_html(card: dict, label: str) -> str:
+    if not card.get("in_dataset"):
+        return f"""
+        <div class="hud-card">
+          <div class="hud-meta">{label}</div>
+          <p>Not in the scouted dataset — using rating only.</p>
+        </div>
+        """
+    rating = _fmt_int(card.get("rating"))
+    games90 = _fmt_int(card.get("games_last_90d"))
+    wr = _fmt_pct(card.get("recent_win_rate_90d"))
+    won365 = _fmt_int(card.get("events_won_last_365d"))
+    top5 = _fmt_int(card.get("top_5_finishes_last_365d"))
+    rd180 = _fmt_num(card.get("rating_change_180d_proxy"))
+    home = card.get("home_region") or "—"
+    tc = card.get("best_time_control") or "—"
+    score = card.get("underrated_score")
+    bucket = card.get("underrated_bucket") or "—"
+    if pd.notna(score):
+        up_pill = pill(f"UNDERRATED  {score:.0f}/100",
+                       "gold" if score >= 70 else "")
+        bucket_html = f'<div style="color:var(--cyan-soft);font-size:0.85rem;">{bucket}</div>'
+    else:
+        up_pill = pill("UNDERRATED  INSUFF DATA", "danger")
+        bucket_html = ""
+    danger_pill = pill("SMALL-SAMPLE WARNING", "danger") if card.get("small_sample_warning") else ""
+
+    sigs = card.get("highlight_signals") or ""
+    sig_html = ""
+    if sigs:
+        bits = "".join(f"<li>{s.strip()}</li>" for s in sigs.split("•") if s.strip())
+        sig_html = f"""
+        <div class="hud-meta" style="margin-top:0.7rem;">WHY DANGEROUS</div>
+        <ul style="margin:0;padding-left:1.2rem;line-height:1.7;font-size:0.92rem;">{bits}</ul>
+        """
+
+    return f"""
+    <div class="hud-card">
+      <div class="hud-meta">{label}</div>
+      <div style="font-family:'Share Tech Mono',monospace;font-size:0.85rem;line-height:1.8;">
+        RATING ........... <span style="color:var(--cyan-main);">{rating}</span><br/>
+        GAMES 90d ........ {games90}<br/>
+        WIN RATE 90d ..... {wr}<br/>
+        EVENTS WON 365d .. {won365}<br/>
+        TOP-5 365d ....... {top5}<br/>
+        Δ RATING 180d .... <span style="color:var(--gold-accent);">{rd180}</span><br/>
+        BEST TC .......... {tc}<br/>
+        HOME REGION ...... {home}<br/>
+      </div>
+      <div style="margin-top:0.6rem;">{up_pill}{danger_pill}{bucket_html}</div>
+      {sig_html}
+    </div>
+    """
+
+
+def _outlook_text(report: dict) -> str:
+    pred = report["prediction"]
+    p, o = report["player_card"], report["opponent_card"]
+    bits = []
+    pwin = pred["p_win_model"]
+    if pwin >= 0.65:
+        bits.append("**CLEAR FAVORITE** &mdash; rating and form both work in your favor.")
+    elif pwin >= 0.55:
+        bits.append("**SLIGHT EDGE** &mdash; closer than rating alone suggests.")
+    elif pwin >= 0.45:
+        bits.append("**ROUGHLY EVEN** &mdash; this game could go either way.")
+    elif pwin >= 0.35:
+        bits.append("**SLIGHT UNDERDOG** &mdash; upset is well within reach.")
+    else:
+        bits.append("**CLEAR UNDERDOG** &mdash; playing for an upset.")
+
+    d = pred["model_vs_elo_disagreement_pp"]
+    if abs(d) >= 5:
+        if d > 0:
+            bits.append(f"Model is **+{d:.0f} pp more bullish** on you than Elo &mdash; "
+                        "your recent activity / form likely outpaces your static rating.")
+        else:
+            bits.append(f"Model is **{d:.0f} pp less bullish** on you than Elo &mdash; "
+                        "opponent's recent form is the more dangerous side of this matchup.")
+    if o.get("in_dataset") and o.get("underrated_score") and o["underrated_score"] >= 60:
+        bits.append(f"⚠ Opponent's <em>Underrated Potential</em> is "
+                    f"<strong>{o['underrated_score']:.0f}/100</strong> "
+                    f"({o['underrated_bucket']}) &mdash; expect tougher than rating suggests.")
+    if p.get("in_dataset") and (p.get("games_last_90d") or 0) == 0:
+        bits.append("Note: **you've been inactive 90+ days** &mdash; possible rust.")
+    if o.get("in_dataset") and (o.get("games_last_90d") or 0) >= 15:
+        bits.append("Note: opponent is **very active recently** &mdash; sharper than rating suggests.")
+    return "<br/><br/>".join(bits)
+
+
+def page_matchup_sim():
+    hud_header(
+        "MATCHUP SIM  ·  CONTACT IMMINENT",
+        "Predicted Win Probability + Opponent Risk Profile",
+        "Model probability + Elo baseline + side-by-side scouting cards + plain-English outlook.",
+    )
+
+    profiles = load_profiles()
+    scores = load_scores()
+    matchup = get_matchup_module()
+    if profiles is None or matchup is None:
+        st.error("Profiles or matchup module unavailable.")
+        return
+
+    c1, c2, c3 = st.columns([1, 1, 0.6])
+    with c1:
+        p_id = _player_picker(profiles, key="match_p", default_idx=0)
+    with c2:
+        o_id = _player_picker(profiles, key="match_o", default_idx=1)
+    with c3:
+        tc = st.selectbox("TIME CONTROL", ["Regular", "Quick", "Blitz", "Unknown"])
+
+    if p_id == o_id:
+        st.error("PLAYER == OPPONENT. Select two different IDs.")
+        return
+
+    if st.button("EXECUTE MATCHUP SIMULATION", type="primary"):
+        with st.spinner("Scanning histories · loading model · computing probabilities..."):
+            try:
+                report = matchup.build_matchup_report(p_id, o_id, time_control=tc)
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Matchup failed: {e}")
+                return
+
+        pred = report["prediction"]
+        cA, cB, cC = st.columns(3)
+        cA.metric("MODEL P(WIN)", f"{pred['p_win_model']*100:.1f}%")
+        cB.metric("ELO BASELINE", f"{pred['p_win_elo']*100:.1f}%",
+                  f"{pred['model_vs_elo_disagreement_pp']:+.1f} pp")
+        cC.metric("RATING DIFF", f"{pred['rating_diff']:+.0f}")
+
+        # Risk pill strip
+        risk = "LOW"
+        if pred["p_win_model"] < 0.4:
+            risk = "HIGH"
+        elif pred["p_win_model"] < 0.55:
+            risk = "MEDIUM"
+        risk_var = {"LOW": "", "MEDIUM": "gold", "HIGH": "danger"}[risk]
+        delta_pp = pred["model_vs_elo_disagreement_pp"]
+        delta_var = "gold" if abs(delta_pp) >= 5 else ""
+        threat_pill = pill(f"THREAT LEVEL · {risk}", risk_var)
+        tc_pill = pill(f"TIME CONTROL · {tc}")
+        delta_pill = pill(f"DELTA vs ELO · {delta_pp:+.1f} pp", delta_var)
+        st.markdown(
+            f'<div style="text-align:center;margin:0.4rem 0 0.6rem 0;">'
+            f'{threat_pill}{tc_pill}{delta_pill}</div>',
+            unsafe_allow_html=True,
+        )
+
+        divider()
+        cL, cR = st.columns(2)
+        with cL:
+            st.markdown(_opponent_card_html(report["player_card"], "PLAYER DOSSIER  ·  YOU"),
+                        unsafe_allow_html=True)
+        with cR:
+            st.markdown(_opponent_card_html(report["opponent_card"], "OPPONENT DOSSIER"),
+                        unsafe_allow_html=True)
+
+        divider()
+        hud_card("MATCHUP OUTLOOK  ·  PLAIN ENGLISH", _outlook_text(report), variant="success")
+
+
+# ============================================================================
+# PAGE 7 — Data Repair Log
+# ============================================================================
+def page_data_repair_log():
+    hud_header(
+        "DATA REPAIR LOG  ·  PARSER PATCH  v1.1",
+        "System Repair Log: USCF Rating Field",
+        "How we caught a parser bug that made the strongest chess predictor look worse than random.",
+    )
+
+    hud_card(
+        "WARNING · CORRUPTED RATING SIGNAL",
+        """
+        <p><strong style="color:var(--red-soft)">SYMPTOM.</strong>
+        During EDA, <code>rating_diff</code> correlated <em>negatively</em>
+        with winning (r = <strong>−0.13</strong>). That is mathematically
+        impossible if the rating column is correct &mdash; a higher-rated
+        player should win more, not less.</p>
+        <p><strong style="color:var(--red-soft)">DOWNSTREAM IMPACT.</strong>
+        The Elo zero-shot baseline calibrated against <code>rating_diff</code>
+        scored <strong>AUC 0.37</strong> on the held-out test set &mdash;
+        <em>worse than random</em>. The tuned Random Forest was at 0.67,
+        which <em>looked</em> fine if you didn't know what good looked like.</p>
+        """,
+        variant="warning",
+    )
+
+    hud_card(
+        "DIAGNOSTIC · CHESS LOGIC FAILED",
+        """
+        <p>If a higher-rated player loses more often than a lower-rated one,
+        either the universe broke or the data did. We trusted chess theory
+        and audited the data pipeline upstream of the model.</p>
+        <p>Spot-checks of individual rows showed <strong>"ratings" that
+        looked suspiciously like the leading digits of the opponent's USCF
+        ID</strong> (e.g. ID 31462359 → rating "3146"; ID 16108388 →
+        rating "1610"). That's not a real chess rating &mdash; that's an
+        ID prefix.</p>
+        """,
+    )
+
+    hud_card(
+        "PATCH · PARSER REGEX FIXED",
+        """
+        <p>Root cause in <code>src/parser/msa_parser.py</code>:</p>
+        <pre style="background:rgba(122,247,255,0.04);padding:0.6rem;border-left:2px solid var(--red-soft);">
+<span style="color:var(--red-soft)">- rating_match = re.search(r'(?:R:)?\\s*(\\d{3,4})', id_rating_str)</span>
+<span style="color:var(--cyan-main)">+ rating_match = re.search(r'R:\\s*(\\d{3,4}P?\\d*)', id_rating_str)</span>
+        </pre>
+        <p>The original regex was unanchored: <code>\\d{3,4}</code> matched
+        the <em>first</em> 3-4 digit run in the string, which is the leading
+        digits of the 8-digit USCF ID, not the rating that follows
+        <code>R:</code>. The fix anchors on the literal <code>R:</code> token
+        and preserves the optional provisional suffix
+        (e.g. <code>1450P12</code>) for downstream cleaning.</p>
+        <p>We then re-parsed the entire local HTML cache (<strong>3,020
+        crosstables</strong>) — no re-scraping needed.</p>
+        """,
+    )
+
+    # Before/After table — hand-rolled HTML for full styling control
+    bf_rows = [
+        ("rating_diff ↔ win (correlation)", "−0.13",              "+0.49"),
+        ("Elo zero-shot test AUC",           "0.37",               "0.825"),
+        ("Tuned Random Forest test AUC",     "0.674",              "0.823"),
+        ("Tuned Gradient Boosting test AUC", "0.668",              "0.825"),
+        ("Median parsed rating",             "1483 (ID prefix)",   "1998 (real)"),
+        ("Max parsed rating",                "3261 (ID prefix)",   "2861 (real)"),
+    ]
+    th_style = (
+        "color:var(--cyan-soft);text-align:left;padding:0.4rem 0.6rem;"
+        "border-bottom:1px solid var(--cyan-muted);text-transform:uppercase;"
+        "letter-spacing:0.1em;"
+    )
+    td_style = "padding:0.35rem 0.6rem;border-bottom:1px solid rgba(122,247,255,0.08);"
+    table_style = (
+        "width:100%;border-collapse:collapse;"
+        "font-family:'Share Tech Mono',monospace;font-size:0.85rem;"
+    )
+    rows_html = "".join(
+        f"<tr><td style=\"{td_style}\">{sig}</td>"
+        f"<td style=\"{td_style};color:var(--red-soft);\">{before}</td>"
+        f"<td style=\"{td_style};color:var(--cyan-main);\">{after}</td></tr>"
+        for sig, before, after in bf_rows
+    )
+    table_html = (
+        f"<table style=\"{table_style}\">"
+        f"<thead><tr>"
+        f"<th style=\"{th_style}\">Signal</th>"
+        f"<th style=\"{th_style}\">Before (bug)</th>"
+        f"<th style=\"{th_style}\">After (fixed)</th>"
+        f"</tr></thead><tbody>{rows_html}</tbody></table>"
+    )
+
+    hud_card("ACCESS RESTORED · BEFORE / AFTER", table_html, variant="success")
+
+    hud_card(
+        "TAKEAWAY · PROCESS DISCIPLINE",
+        """
+        <p>Always sanity-check feature correlations against
+        <strong style="color:var(--gold-accent)">domain knowledge</strong>
+        before trusting the model. A regex bug in the data-collection
+        layer made the world's strongest known chess predictor look
+        worse than random &mdash; and the model's accuracy alone
+        was not enough to catch it.</p>
+        """,
+        variant="gold",
+    )
+
+
+# ============================================================================
+# Dispatcher
+# ============================================================================
+PAGES = {
+    "01 // COMMAND CENTER":      page_command_center,
+    "02 // MODEL INTEL":         page_model_intel,
+    "03 // FEATURE VECTORS":     page_feature_vectors,
+    "04 // PLAYER DOSSIER":      page_player_dossier,
+    "05 // UNDERRATED PROTOCOL": page_underrated_protocol,
+    "06 // MATCHUP SIM":         page_matchup_sim,
+    "07 // DATA REPAIR LOG":     page_data_repair_log,
+}
+
+render_top_band()
+PAGES[page]()
+render_footer()

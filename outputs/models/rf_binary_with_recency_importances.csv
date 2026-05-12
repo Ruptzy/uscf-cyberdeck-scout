@@ -1,0 +1,13 @@
+Feature,Importance
+player_recent_win_rate_90d,0.2398049588401734
+opponent_pre_rating,0.21222037131740362
+player_pre_rating,0.15431693343437922
+player_recent_avg_opponent_rating_90d,0.10674108583586941
+player_games_last_365d,0.09534678818098902
+player_games_last_90d,0.08569281094148594
+player_games_last_30d,0.05345623842816502
+time_control_Quick,0.016621978131920137
+time_control_Regular,0.013694875705307955
+time_control_Mixed,0.013595896114971522
+missing_recent_avg_opp_90d,0.004826807557243849
+missing_recent_win_rate_90d,0.0036812555120909383

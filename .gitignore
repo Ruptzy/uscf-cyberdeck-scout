@@ -1,0 +1,54 @@
+# =============================================================
+# USCF Cyberdeck Scout — .gitignore
+# Excludes raw cached HTML (~200MB), local snapshots, and Python junk.
+# What stays: scripts/, app.py, src/, processed CSVs, model artifacts,
+# docs/, deploy config.  See DEPLOYMENT.md for the deploy payload list.
+# =============================================================
+
+# --- Raw scrape & cache (huge; NOT needed for the deployed app) ---
+data/raw/
+data/raw/html_cache/
+data/raw/tables/
+
+# --- Local snapshots / regenerable EDA images ---
+outputs/frozen/
+outputs/eda/
+outputs/reports/
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+
+# --- Virtual envs ---
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Streamlit secrets ---
+.streamlit/secrets.toml
+
+# --- Misc ---
+.env
+.envrc
+*.log
+.ipynb_checkpoints/

@@ -1,0 +1,9 @@
+# Dashboard-only requirements for USCF Cyberdeck Scout
+# (deliberately slim — no scraping deps, no notebook deps)
+
+streamlit>=1.30
+pandas>=2.0
+numpy>=1.25
+scikit-learn>=1.3
+plotly>=5.18
+beautifulsoup4>=4.12   # imported indirectly by scripts/21 via the matchup module

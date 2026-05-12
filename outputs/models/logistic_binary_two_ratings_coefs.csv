@@ -1,0 +1,7 @@
+Feature,Coefficient
+player_pre_rating,0.0001397754728880126
+opponent_pre_rating,0.0004758018755951086
+time_control_Mixed,0.31451910748265477
+time_control_Quick,0.2731969055453307
+time_control_Regular,0.18218485602898105
+Intercept,-1.6357881814851634

@@ -1,0 +1,45 @@
+{
+  "prediction": {
+    "p_win_model": 0.31869762348339853,
+    "p_win_elo": 0.527315973006493,
+    "rating_diff": 19.0,
+    "time_control": "Regular",
+    "model_vs_elo_disagreement_pp": -20.86183495230945
+  },
+  "player_card": {
+    "label": "Player (you)",
+    "in_dataset": true,
+    "rating": 2666.0,
+    "career_games": 206,
+    "games_last_90d": 0,
+    "recent_win_rate_90d": NaN,
+    "events_won_last_365d": 0,
+    "top_5_finishes_last_365d": 0,
+    "rating_change_180d_proxy": 0.0,
+    "best_time_control": "Regular",
+    "home_region": "CA",
+    "underrated_score": NaN,
+    "underrated_bucket": "Insufficient data",
+    "smurf_label": "\u26aa Insufficient data",
+    "highlight_signals": "Needs more recent games before scouting score is meaningful.",
+    "small_sample_warning": true
+  },
+  "opponent_card": {
+    "label": "Opponent",
+    "in_dataset": true,
+    "rating": 2647.0,
+    "career_games": 110,
+    "games_last_90d": 9,
+    "recent_win_rate_90d": 0.4444444444444444,
+    "events_won_last_365d": 0,
+    "top_5_finishes_last_365d": 2,
+    "rating_change_180d_proxy": 22.0,
+    "best_time_control": "Regular",
+    "home_region": "MD",
+    "underrated_score": 36.1,
+    "underrated_bucket": "Normal \u2014 no strong signal",
+    "smurf_label": "\u26aa Looks fair",
+    "highlight_signals": "\u2022 Performs best in Regular events. \u2022 Upset: Competitive against stronger fields. \u2022 Momentum: Stable. \u2022 Activity: Active.",
+    "small_sample_warning": false
+  }
+}
