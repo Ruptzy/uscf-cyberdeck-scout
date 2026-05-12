@@ -1,4 +1,16 @@
-requests==2.31.0
-beautifulsoup4==4.12.2
-pandas
-pyyaml==6.0.1
+# Canonical requirements for Streamlit Community Cloud / Render / HF Spaces.
+# Streamlit Cloud auto-detects this filename — keep it as the source of truth.
+# The slim duplicate `requirements-dashboard.txt` is kept for local dev,
+# but Cloud reads THIS file.
+
+streamlit>=1.30
+pandas>=2.0
+numpy>=1.25
+scikit-learn>=1.3
+plotly>=5.18
+beautifulsoup4>=4.12
+
+# --- Offline data-collection deps (not used by the deployed app, but kept
+# so re-running the local pipeline doesn't need a second requirements file).
+requests>=2.31
+pyyaml>=6.0
