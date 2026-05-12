@@ -650,6 +650,11 @@ def build_coaching_advice(profile: dict, score: dict | None) -> list[str]:
     wr90 = profile.get("recent_win_rate_90d")
     best_tc = profile.get("best_time_control_by_score_rate")
     blitz_pct = profile.get("pct_blitz_games") or 0
+    travel_label = (profile.get("traveling_competitor_label") or "").lower()
+    unique_locs = profile.get("unique_event_locations") or 0
+    avg_travel = profile.get("avg_travel_distance_miles")
+    losses_lower = profile.get("losses_vs_100_plus_lower") or 0
+    career = profile.get("career_n_games") or 0
 
     # --- Upset / giant-killer ---
     if upset >= 14:
@@ -681,7 +686,7 @@ def build_coaching_advice(profile: dict, score: dict | None) -> list[str]:
         )
 
     # --- Rusty / inactive ---
-    if (g90 or 0) <= 1 and (profile.get("career_n_games") or 0) >= 30:
+    if (g90 or 0) <= 1 and career >= 30:
         out.append(
             "**Possibly rusty.** They haven't played much in the last 90 days. Apply steady "
             "pressure and let them solve practical problems rather than forcing chaos."
@@ -699,7 +704,7 @@ def build_coaching_advice(profile: dict, score: dict | None) -> list[str]:
             "strategic phases and don't expect them to crack from time pressure alone."
         )
 
-    # --- Strong schedule ---
+    # --- Strong schedule (plays up) ---
     if sched >= 10:
         out.append(
             "**Battle-tested.** This player frequently plays up against stronger fields, so "
@@ -720,11 +725,39 @@ def build_coaching_advice(profile: dict, score: dict | None) -> list[str]:
             "become overconfident — players bounce back."
         )
 
+    # --- Travel-active / road warrior ---
+    if "road warrior" in travel_label or "travel-active" in travel_label or unique_locs >= 6:
+        msg = "**Travel-active competitor.** "
+        if avg_travel and avg_travel > 0:
+            msg += f"Averages about {avg_travel:.0f} miles per event. "
+        msg += (
+            "Players who consistently travel to events tend to be more "
+            "tournament-hardened than rating suggests. Expect practical resilience "
+            "and well-established over-the-board habits."
+        )
+        out.append(msg)
+
+    # --- Mostly local player ---
+    if "local" in travel_label and unique_locs <= 3:
+        out.append(
+            "**Mostly local player.** Plays a narrow set of venues. May be less "
+            "tournament-hardened than frequent travelers, though strong local players "
+            "often still have deep familiarity with their usual fields."
+        )
+
+    # --- Loses to lower-rated players (drops points to weaker fields) ---
+    if losses_lower >= 5:
+        out.append(
+            "**Sometimes loses to lower-rated players.** Keep the game stable and let "
+            "them create their own weaknesses. Avoid giving them unnecessary tactical "
+            "chances — patience is rewarded against this profile."
+        )
+
     # Fallback if nothing strong fired
     if not out:
         out.append(
-            "No standout danger signals. Play your usual preparation and trust the rating "
-            "difference if it favors you."
+            "**No standout danger signals.** Trust the rating difference if it favors "
+            "you and play your usual preparation. Every game is still decided over the board."
         )
 
     return out[:6]
@@ -942,6 +975,69 @@ def page_command_center():
         variant="success",
     )
 
+    # ------- The modern underrated-player problem -------
+    cM1, cM2 = st.columns(2)
+    with cM1:
+        hud_card(
+            "THE MODERN UNDERRATED-PLAYER PROBLEM",
+            """
+            <p style="font-size:1.0rem; line-height:1.6;">
+            Since online chess exploded in popularity (especially during the
+            post-2020 boom), many players improve dramatically <strong>online</strong>
+            before they show up at an official over-the-board tournament. They play
+            thousands of online games, study openings, run engines, take lessons —
+            and their <em>practical</em> strength climbs much faster than their
+            official rating can catch up.
+            </p>
+            <p style="font-size:1.0rem; line-height:1.6;">
+            That creates a real scouting problem. A player may walk into your
+            section with a modest official rating but actually play closer to a
+            much higher level. They may have an inactive rating from years ago,
+            or simply not enough USCF events for the system to know how strong
+            they currently are.
+            </p>
+            <p style="font-size:1.0rem; line-height:1.6; color:var(--gold-accent);">
+            The goal of this dashboard is to surface those signals before the
+            game — <em>not to accuse anyone of anything</em>, just to give players
+            a better picture of who is across the board.
+            </p>
+            """,
+            variant="warning",
+        )
+    with cM2:
+        hud_card(
+            "WHY RATING ALONE IS NOT ENOUGH",
+            """
+            <p style="font-size:1.0rem; line-height:1.6;">
+            Official ratings are powerful, but they can <strong>lag behind reality</strong>.
+            Rating doesn't show:
+            </p>
+            <ul style="font-size:1.0rem; line-height:1.7; padding-left:1.2rem;">
+              <li>how active the player has been in the last 90 days</li>
+              <li>their <strong>recent win rate</strong> against real opposition</li>
+              <li>how often they <strong>beat higher-rated players</strong></li>
+              <li>whether their rating is currently <strong>rising or stagnant</strong></li>
+              <li>which time controls they actually perform best in</li>
+              <li>whether they travel to play strong fields or mostly play locally</li>
+            </ul>
+            <p style="font-size:1.0rem; line-height:1.6;">
+            All of these add scouting context that pure rating cannot.
+            </p>
+            """,
+        )
+
+    # ------- One-liner stinger -------
+    render_html("""
+        <div style="text-align:center; margin:1.0rem 0 0.4rem 0;">
+          <span style="font-family:'Rajdhani',sans-serif; font-size:1.4rem;
+                       color:var(--cyan-main); letter-spacing:0.03em;
+                       text-shadow:0 0 8px rgba(122,247,255,0.4);">
+            "Rating tells you who is favored.&nbsp;
+            <span style="color:var(--gold-accent);">Scouting tells you what kind of opponent you're actually facing.</span>"
+          </span>
+        </div>
+    """)
+
     # ------- The 6-step process flow -------
     render_html('<div class="hud-meta" style="margin-top:1.2rem;">>> PROJECT PROCESS  ·  HOW WE BUILT IT</div>')
     steps = [
@@ -1066,6 +1162,96 @@ def page_command_center():
         """,
         variant="warning",
     )
+
+    # ------- How to use this tool responsibly -------
+    divider()
+    hud_card(
+        "HOW TO USE THIS TOOL  ·  RESPONSIBLE USE NOTE",
+        """
+        <p style="font-size:1.02rem; line-height:1.6;">
+        Use this dashboard as a <strong>scouting aid</strong>, not as a final
+        judgment. Official rating is still one of the strongest predictors in
+        chess; the metrics here add useful context, but they are
+        <strong>signals — not proof</strong>.
+        </p>
+        <p style="font-size:1.02rem; line-height:1.6;">
+        The Underrated Potential score does <strong>not</strong> prove that
+        anyone is a "smurf" or doing anything wrong. It simply highlights
+        players whose recent activity, upset history, rating movement, or
+        event results suggest that the rating <em>may be lagging behind
+        current strength</em>. Always interpret small samples carefully,
+        and remember that every game is still decided over the board.
+        </p>
+        """,
+        variant="gold",
+    )
+
+    # ------- Roadmap / future product ideas -------
+    divider()
+    render_html('<div class="hud-meta" style="margin-top:0.3rem;">>> ROADMAP  ·  NEXT VERSIONS OF THE SCOUT</div>')
+    rL, rR = st.columns(2)
+    with rL:
+        hud_card(
+            "LIVE USCF LOOKUP  ·  COMING SOON",
+            """
+            <p style="font-size:1.0rem; line-height:1.6;">
+            A future version will let you type any USCF ID and have the app
+            fetch that player's public tournament history on demand, update
+            the local cache, and generate a fresh scouting report in real time.
+            </p>
+            <p style="font-size:0.95rem; line-height:1.55; color:var(--text-muted);">
+            For now the deployed dashboard reads from a precomputed cache only —
+            no live scraping at runtime, no API keys, no server load on USCF.
+            If a player you're searching for isn't in the cached set, the
+            dashboard will tell you they're not in the current dataset yet.
+            </p>
+            """,
+        )
+    with rR:
+        hud_card(
+            "DEEPER TRAVEL / GEOGRAPHY ANALYSIS",
+            """
+            <p style="font-size:1.0rem; line-height:1.6;">
+            Travel features are already in the Player Dossier (home region,
+            unique event locations, approximate travel distance, "road
+            warrior" labels). Future versions can refine this with full
+            ZIP-code-level geocoding, event venue lookups, and a travel-map
+            visual for each player.
+            </p>
+            <p style="font-size:0.95rem; line-height:1.55; color:var(--text-muted);">
+            Why this matters: travel patterns are a behavioral signal of
+            tournament commitment. A player who consistently travels for
+            events tends to be more battle-tested than rating alone shows.
+            </p>
+            """,
+        )
+
+    # ------- Value statement strip -------
+    divider()
+    render_html("""
+        <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:0.8rem; margin-top:0.4rem;">
+          <div class="hud-card">
+            <div class="hud-meta">PRINCIPLE 01</div>
+            <p style="font-size:0.98rem; line-height:1.5; margin:0;">
+              Rating is the strongest signal, but it is <strong>not the only useful signal</strong>.
+            </p>
+          </div>
+          <div class="hud-card">
+            <div class="hud-meta">PRINCIPLE 02</div>
+            <p style="font-size:0.98rem; line-height:1.5; margin:0;">
+              The model estimates who is favored. The scouting layer explains
+              <strong>why a matchup may still be dangerous</strong>.
+            </p>
+          </div>
+          <div class="hud-card">
+            <div class="hud-meta">PRINCIPLE 03</div>
+            <p style="font-size:0.98rem; line-height:1.5; margin:0;">
+              The goal is not to replace chess judgment — it's to give players a
+              <strong>better pre-game picture</strong>.
+            </p>
+          </div>
+        </div>
+    """)
 
 
 # ============================================================================
@@ -1609,16 +1795,23 @@ def page_underrated_protocol():
         """
         <p style="font-size:1.02rem; line-height:1.6;">
         The <strong style="color:var(--cyan-main)">Underrated Potential</strong>
-        score estimates whether a player may currently be performing above
-        their official rating, based on six interpretable signals:
-        recent results against stronger opponents (upset), recent win rate
-        (form), rating movement (momentum), strength of schedule, activity,
-        and result-by-result volatility.
+        score estimates whether a player may currently be stronger than their
+        official rating suggests. It combines six signals: results against
+        stronger opponents, recent form, rating movement, strength of schedule,
+        activity, and volatility.
         </p>
         <p style="font-size:1.02rem; line-height:1.6;">
-        It is <strong>not</strong> an accusation. We use the phrase
-        "may be playing above rating" or "rating may be lagging behind
-        current strength" — not "smurf."
+        This score is <strong>not an accusation</strong>. It does not prove a
+        player is a "smurf." It simply flags cases where the official rating
+        may not fully capture current playing strength &mdash; for example,
+        a player who has improved significantly online before their over-the-board
+        rating could catch up.
+        </p>
+        <p style="font-size:0.95rem; line-height:1.55; color:var(--text-muted);">
+        A score of 0–30 means the rating looks accurate; 31–55 means no strong
+        signal either way; 56–70 is a watchlist; 71–85 is a strong underrated
+        signal; 86+ is very likely playing above rating. All scores are damped
+        by a sample-size multiplier so flukes can't headline.
         </p>
         """,
     )
@@ -1633,71 +1826,120 @@ def page_underrated_protocol():
     row = profiles[profiles["player_id"] == pick].iloc[0]
     sc = scores[scores["player_id"] == pick].iloc[0] if not scores[scores["player_id"] == pick].empty else None
 
+    # Source of truth for "do we have any data?" is the profile row's
+    # career_n_games count — NOT a possibly-stale `underrated_score` value
+    # in the scoring CSV. As long as the player has at least one career
+    # game, we render the full breakdown.
+    n_career = int(row.get("career_n_games") or 0)
+    has_career_data = n_career > 0
+
+    # Per-component scores — pull from the scoring CSV when present,
+    # otherwise compute on-the-fly from the profile so the dashboard
+    # never silently falls back to "no data" if the CSV is stale.
+    def _sc_get(name: str, default: float = 0.0) -> float:
+        if sc is None:
+            return default
+        v = sc.get(name)
+        try:
+            return float(v) if v is not None and not pd.isna(v) else default
+        except (TypeError, ValueError):
+            return default
+
+    score_val      = _sc_get("underrated_score")
+    upset_v        = _sc_get("upset_score")
+    form_v         = _sc_get("form_score")
+    moment_v       = _sc_get("momentum_score")
+    sched_v        = _sc_get("schedule_score")
+    active_v       = _sc_get("activity_score")
+    vol_v          = _sc_get("volatility_score")
+    sample_mult    = _sc_get("sample_size_multiplier", 1.0)
+    bucket         = sc.get("bucket_label") if sc is not None else None
+    advisory_text  = sc.get("data_advisory") if sc is not None else None
+
     cG, cI = st.columns([1, 1.2])
     with cG:
-        gauge_val = float(sc["underrated_score"]) if (sc is not None and pd.notna(sc.get("underrated_score"))) else 0
-        st.plotly_chart(_gauge(gauge_val), width="stretch")
-        if sc is not None:
-            badge_var = "gold" if gauge_val >= 70 else "danger" if sc.get("bucket_label") == "No data on file" else ""
+        st.plotly_chart(_gauge(score_val if has_career_data else 0), width="stretch")
+        if has_career_data:
+            badge_var = "gold" if score_val >= 70 else ""
+            label = bucket or "Score available"
             render_html(
-                f'<div style="text-align:center;">{pill(sc.get("bucket_label","—"), badge_var)}</div>'
+                f'<div style="text-align:center;">{pill(label, badge_var)}</div>'
             )
 
     with cI:
-        if sc is None or sc.get("underrated_score") is None or pd.isna(sc.get("underrated_score")):
+        if not has_career_data:
             hud_card(
-                "NO DATA ON FILE",
-                f"""
-                <p>This player has <strong>{_fmt_int(row.get('career_n_games'))}</strong>
-                career games on file. The Underrated Potential score requires at least
-                one career game to compute meaningful signals.</p>
-                """,
+                "NO TOURNAMENT HISTORY ON FILE",
+                "<p>This player has no career games on file in the current dataset. "
+                "Live USCF lookup is on the roadmap — see the landing page.</p>",
                 variant="warning",
             )
         else:
-            bars = []
-            bars.append(hud_progress(f"UPSET ({sc['upset_score']:.1f}/25)",        sc["upset_score"] * 100 / 25,        "gold" if sc["upset_score"] >= 12 else ""))
-            bars.append(hud_progress(f"RECENT FORM ({sc['form_score']:.1f}/20)",   sc["form_score"] * 100 / 20))
-            bars.append(hud_progress(f"MOMENTUM ({sc['momentum_score']:.1f}/20)",  sc["momentum_score"] * 100 / 20))
-            bars.append(hud_progress(f"SCHEDULE ({sc['schedule_score']:.1f}/15)",  sc["schedule_score"] * 100 / 15))
-            bars.append(hud_progress(f"ACTIVITY ({sc['activity_score']:.1f}/10)",  sc["activity_score"] * 100 / 10))
-            bars.append(hud_progress(f"VOLATILITY ({sc['volatility_score']:.1f}/10)", sc["volatility_score"] * 100 / 10))
-            hud_card(f"COMPONENT BREAKDOWN  ·  ×{sc['sample_size_multiplier']:.2f} SAMPLE-SIZE MULTIPLIER",
-                     "\n".join(bars))
+            bars = [
+                hud_progress(f"UPSET ({upset_v:.1f}/25)",        upset_v * 100 / 25, "gold" if upset_v >= 12 else ""),
+                hud_progress(f"RECENT FORM ({form_v:.1f}/20)",   form_v * 100 / 20),
+                hud_progress(f"MOMENTUM ({moment_v:.1f}/20)",    moment_v * 100 / 20),
+                hud_progress(f"SCHEDULE ({sched_v:.1f}/15)",     sched_v * 100 / 15),
+                hud_progress(f"ACTIVITY ({active_v:.1f}/10)",    active_v * 100 / 10),
+                hud_progress(f"VOLATILITY ({vol_v:.1f}/10)",     vol_v * 100 / 10),
+            ]
+            hud_card(
+                f"COMPONENT BREAKDOWN  ·  ×{sample_mult:.2f} SAMPLE-SIZE MULTIPLIER",
+                "\n".join(bars),
+            )
 
     # ------- Data advisory (always shown — softer than before) -------
-    if sc is not None and sc.get("data_advisory"):
-        hud_card("DATA ADVISORY", f'<p style="font-size:0.98rem; line-height:1.55;">{sc["data_advisory"]}</p>')
+    if has_career_data and advisory_text:
+        hud_card("DATA ADVISORY", f'<p style="font-size:0.98rem; line-height:1.55;">{advisory_text}</p>')
 
     # ------- Plain-English summary -------
-    if sc is not None and pd.notna(sc.get("underrated_score")):
-        bucket = sc.get("bucket_label", "")
+    if has_career_data:
+        bucket_pretty = (bucket or "score available").lower()
         summary_text = (
-            f"This player scores <strong>{sc['underrated_score']:.0f} / 100</strong> on "
-            f"Underrated Potential — <em>{bucket.lower()}</em>. "
+            f"This player scores <strong>{score_val:.0f} / 100</strong> on "
+            f"Underrated Potential — <em>{bucket_pretty}</em>. "
         )
         top_components = sorted(
-            [("Upset", sc["upset_score"]),
-             ("Recent Form", sc["form_score"]),
-             ("Momentum", sc["momentum_score"]),
-             ("Schedule", sc["schedule_score"]),
-             ("Activity", sc["activity_score"]),
-             ("Volatility", sc["volatility_score"])],
+            [("Upset", upset_v), ("Recent Form", form_v), ("Momentum", moment_v),
+             ("Schedule", sched_v), ("Activity", active_v), ("Volatility", vol_v)],
             key=lambda t: -t[1],
         )[:2]
         if any(v >= 6 for _, v in top_components):
             top_names = ", ".join(n for n, v in top_components if v >= 6)
             summary_text += f"Strongest contributing signals: <strong>{top_names}</strong>."
+        else:
+            summary_text += (
+                "No single signal stands out, which usually means the player's "
+                "rating is a reasonably honest reflection of recent results."
+            )
         hud_card("WHAT THE SCORE SAYS", f'<p style="font-size:1.0rem; line-height:1.6;">{summary_text}</p>')
 
-    if sc is not None and sc.get("highlight_signals"):
-        divider()
-        sig_html = "".join(f"<li>{s.strip()}</li>" for s in sc["highlight_signals"].split("•") if s.strip())
+        # Always-on responsible-use reminder on this page
         hud_card(
-            "WHY THIS PLAYER MIGHT BE DANGEROUS",
-            f'<ul style="margin:0;padding-left:1.2rem;line-height:1.8;">{sig_html}</ul>',
-            variant="gold",
+            "RESPONSIBLE USE",
+            """
+            <p style="font-size:0.98rem; line-height:1.55;">
+            The Underrated Potential score is a <strong>scouting signal</strong>,
+            not a final judgment. It does not prove that a player is a "smurf" or
+            doing anything wrong — it simply highlights cases where the rating
+            may be lagging behind current strength based on recent results,
+            activity, and rating movement.
+            </p>
+            """,
         )
+
+    if has_career_data and sc is not None and isinstance(sc.get("highlight_signals"), str) and sc.get("highlight_signals"):
+        divider()
+        sig_html = "".join(
+            f"<li>{s.strip()}</li>"
+            for s in sc["highlight_signals"].split("•") if s.strip()
+        )
+        if sig_html:
+            hud_card(
+                "WHY THIS PLAYER MIGHT BE DANGEROUS",
+                f'<ul style="margin:0;padding-left:1.2rem;line-height:1.8;">{sig_html}</ul>',
+                variant="gold",
+            )
 
     divider()
     # Distribution of all players

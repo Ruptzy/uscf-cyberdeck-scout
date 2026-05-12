@@ -463,18 +463,18 @@ def main():
         max_travel = float(np.max(distances))  if distances else None
         pct_outside = (outside_home / total_events_with_state) if total_events_with_state else None
 
-        # Label
+        # Label — uses the spec's friendly buckets
         label = "Insufficient location data"
         confidence = "low"
         if avg_travel is not None:
             if avg_travel < 30:
-                label = "Local grinder"
+                label = "Mostly Local Player"
             elif avg_travel < 100:
-                label = "Regional traveler"
+                label = "Regional Traveler"
             elif avg_travel < 500:
-                label = "Multi-state competitor"
+                label = "Travel-Active Competitor"
             else:
-                label = "Tournament road warrior"
+                label = "Tournament Road Warrior"
             # confidence depends on whether we hit city centroids or just state
             city_share = (g_geo["event_geo_source"] == "city_centroid").mean() if len(g_geo) else 0
             confidence = "approximate (city-level)" if city_share >= 0.5 else "approximate (state-level)"
